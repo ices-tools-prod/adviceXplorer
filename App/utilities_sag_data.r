@@ -1000,12 +1000,54 @@ info <- jsonlite::fromJSON(
   )
 }
 
-# -----------------------------------------------------------------------------
-# SAG: components + assessment year + assessmentKey (source of truth for component)
-# -----------------------------------------------------------------------------
+#' In-memory cache for SAG mapping calls
+#'
+#' A `cachem::cache_mem()` backend used to memoise calls to [getSAG_latest_map()]
+#' and [getSAG_year_map()]. The cache reduces repeated network/API calls during a
+#' Shiny session and across short time windows.
+#'
+#' @details
+#' The cache is time-limited (`max_age = 12 * 3600`, i.e., 12 hours) to balance
+#' responsiveness with data freshness.
+#'
+#' @keywords internal
 sag_cache <- cachem::cache_mem(max_age = 12 * 3600)
 
-# Latest map (one call)
+#' Get the latest SAG stock-to-assessment mapping
+#'
+#' Fetches the latest SAG "stock advice list" and returns a normalised mapping
+#' containing the minimal columns needed by the app to connect a stock to its
+#' assessment identifiers and component.
+#'
+#' @return
+#' A `data.table` with columns:
+#' - `StockKeyLabel` (character)
+#' - `AssessmentKey` (integer)
+#' - `AssessmentYear` (integer)
+#' - `AssessmentComponent` (character; normalised so missing/blank/"N.A." variants become `"NA"`)
+#'
+#' If SAG returns an empty/non-data.frame object, returns an empty `data.table()`.
+#'
+#' @details
+#' Data source: `icesSAG::getLatestStockAdviceList()`.
+#'
+#' The function normalises varying column names returned by icesSAG by creating
+#' `StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, and `AssessmentComponent`
+#' when required. It also enforces stable types for ordering and joining, and
+#' standardises component labels using the app convention (`"NA"` for missing).
+#'
+#' The output is deduplicated on
+#' (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' This function is memoised using [sag_cache].
+#'
+#' @examples
+#' \dontrun{
+#' m <- getSAG_latest_map()
+#' m[StockKeyLabel == "dgs.27.nea"]
+#' }
+#'
+#' @export
 getSAG_latest_map <- memoise(function() {
     dt <- icesSAG::getLatestStockAdviceList()
     if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
@@ -1037,7 +1079,43 @@ getSAG_latest_map <- memoise(function() {
     unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
 }, cache = sag_cache)
 
-# Historical by year (one call per year; cached)
+
+
+#' Get the SAG stock-to-assessment mapping for a historical year
+#'
+#' Fetches the SAG list of stocks for a given year and returns a normalised mapping
+#' containing the minimal columns needed by the app.
+#'
+#' @param y Integer-like. The year to query from SAG (passed to
+#'   `icesSAG::getListStocks(year = ...)`).
+#'
+#' @return
+#' A `data.table` with columns:
+#' - `StockKeyLabel` (character)
+#' - `AssessmentKey` (integer)
+#' - `AssessmentYear` (integer)
+#' - `AssessmentComponent` (character; normalised to the app convention)
+#'
+#' If SAG returns an empty/non-data.frame object, returns an empty `data.table()`.
+#'
+#' @details
+#' Data source: `icesSAG::getListStocks(year = y)`.
+#'
+#' This is used when the active year is not the latest SID snapshot and the app
+#' needs to build an historical map spanning multiple assessment years.
+#'
+#' The output is deduplicated on
+#' (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' This function is memoised using [sag_cache].
+#'
+#' @examples
+#' \dontrun{
+#' m_2021 <- getSAG_year_map(2021)
+#' }
+#'
+
+#' @export
 getSAG_year_map <- memoise(function(y) {
     dt <- icesSAG::getListStocks(year = as.integer(y))
     if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
@@ -1068,6 +1146,43 @@ getSAG_year_map <- memoise(function(y) {
     unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
 }, cache = sag_cache)
 
+
+#' Build a SAG mapping table for an active year
+#'
+#' Returns a SAG mapping table appropriate for the app's `active_year`.
+#' For the latest configuration this can be the single-call "latest" map; for
+#' historical configurations this function builds a pooled map across the set of
+#' assessment years implied by the SID snapshot.
+#'
+#' @param active_year Integer-like. The year selected in the app.
+#' @param sid_dt A SID snapshot `data.frame`/`data.table` containing a
+#'   `YearOfLastAssessment` column. Used to infer which SAG years to fetch when
+#'   building an historical map.
+#' @param is_latest Logical. If `TRUE`, return [getSAG_latest_map()] directly.
+#'   If `FALSE`, build a historical map based on `sid_dt`. Defaults to `TRUE`.
+#'
+#' @return
+#' A `data.table` with columns `StockKeyLabel`, `AssessmentKey`, `AssessmentYear`,
+#' `AssessmentComponent`, potentially containing multiple assessment years and
+#' components per stock (to be deduplicated later as needed).
+#'
+#' @details
+#' Historical mode (`is_latest = FALSE`):
+#' 1. Extract unique `YearOfLastAssessment` values from `sid_dt`.
+#' 2. Keep valid years (`!= 0`, non-NA) and restrict to `<= active_year`.
+#' 3. Ensure `active_year` is included in the year set (so the pool covers the active view).
+#' 4. Fetch each year via [getSAG_year_map()] and row-bind.
+#' 5. Drop rows with `AssessmentYear > active_year` (safety guard).
+#' 6. Deduplicate on (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' @examples
+#' \dontrun{
+#' sid <- getSID_meta(2022)
+#' sag_hist <- build_SAG_map_for_active_year(2022, sid, is_latest = FALSE)
+#' }
+#'
+
+#' @export
 build_SAG_map_for_active_year <- function(active_year, sid_dt, is_latest = TRUE) {
     active_year <- as.integer(active_year)
     if (is_latest) {
@@ -1088,6 +1203,50 @@ build_SAG_map_for_active_year <- function(active_year, sid_dt, is_latest = TRUE)
     unique(sag_all, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
 }
 
+
+
+#' Filter SAG mappings to stocks published in ASD (while keeping SAG components)
+#'
+#' Filters a SAG mapping table to retain only records that correspond to published
+#' ASD advice entries. This is used to ensure the UI stock list only shows stocks
+#' that have published advice in ASD, while still relying on SAG as the source of
+#' truth for component values.
+#'
+#' @param sag_dt A `data.frame`/`data.table` produced by [getSAG_latest_map()],
+#'   [getSAG_year_map()], or [build_SAG_map_for_active_year()]. Must contain at least
+#'   `AssessmentKey`, `StockKeyLabel`, and `AssessmentYear`.
+#' @param asd_dt A `data.frame`/`data.table` describing published ASD advice entries.
+#'   Minimum expected columns:
+#'   - `AssessmentKey`
+#'   Optional (enables fallback matching):
+#'   - `StockKeyLabel`
+#'   - `AssessmentYear`
+#'
+#' @return
+#' A `data.table` subset of `sag_dt` containing only rows that match the published
+#' ASD set. If either input is empty, returns `sag_dt[0]` (empty table with SAG columns).
+#'
+#' @details
+#' Matching strategy:
+#' 1. Primary match by `AssessmentKey` for ASD rows where `AssessmentKey` is available.
+#' 2. Fallback match by (`StockKeyLabel`, `AssessmentYear`) for ASD rows where
+#'    `AssessmentKey` is missing or cannot be relied upon.
+#'
+#' The output is deduplicated on
+#' (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' This function is deliberately "component-agnostic": it filters on publication
+#' status but preserves the component values coming from SAG.
+#'
+#' @examples
+#' \dontrun{
+#' sag_map <- getSAG_latest_map()
+#' asd_pub <- unique(asd_cache[, .(AssessmentKey, StockKeyLabel, AssessmentYear)])
+#' sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
+#' }
+#'
+
+#' @export
 filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
     setDT(sag_dt)
     setDT(asd_dt)
