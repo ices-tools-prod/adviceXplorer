@@ -999,3 +999,120 @@ info <- jsonlite::fromJSON(
     )
   )
 }
+
+# -----------------------------------------------------------------------------
+# SAG: components + assessment year + assessmentKey (source of truth for component)
+# -----------------------------------------------------------------------------
+sag_cache <- cachem::cache_mem(max_age = 12 * 3600)
+
+# Latest map (one call)
+getSAG_latest_map <- memoise(function() {
+    dt <- icesSAG::getLatestStockAdviceList()
+    if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+        return(data.table())
+    }
+    setDT(dt)
+
+    # normalise names
+    if ("stockCode" %in% names(dt)) dt[, StockKeyLabel := stockCode]
+    if ("assessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(assessmentKey))]
+    if ("adviceComponent" %in% names(dt)) dt[, AssessmentComponent := adviceComponent]
+    if ("assessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(assessmentYear))]
+    if ("AssessmentYear" %in% names(dt) && !"AssessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+
+    out <- dt[, .(StockKeyLabel, AssessmentKey, AssessmentYear, AssessmentComponent)]
+    out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
+        !is.na(AssessmentKey) & !is.na(AssessmentYear)]
+
+    # Ensure it's character before fifelse (older years may return numeric/factor)
+    out[, AssessmentComponent := as.character(AssessmentComponent)]
+
+    out[, AssessmentComponent := data.table::fifelse(
+        is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+        "NA",
+        AssessmentComponent
+    )]
+
+
+    unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}, cache = sag_cache)
+
+# Historical by year (one call per year; cached)
+getSAG_year_map <- memoise(function(y) {
+    dt <- icesSAG::getListStocks(year = as.integer(y))
+    if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+        return(data.table())
+    }
+    setDT(dt)
+
+    # normalise (adjust if icesSAG returns different names)
+    if ("stockCode" %in% names(dt)) dt[, StockKeyLabel := stockCode]
+    if ("assessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(assessmentKey))]
+    if ("adviceComponent" %in% names(dt)) dt[, AssessmentComponent := adviceComponent]
+    if ("assessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(assessmentYear))]
+    if ("AssessmentYear" %in% names(dt) && !"AssessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+
+    out <- dt[, .(StockKeyLabel, AssessmentKey, AssessmentYear, AssessmentComponent)]
+    out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
+        !is.na(AssessmentKey) & !is.na(AssessmentYear)]
+    # Ensure it's character before fifelse (older years may return numeric/factor)
+    out[, AssessmentComponent := as.character(AssessmentComponent)]
+
+    out[, AssessmentComponent := data.table::fifelse(
+        is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+        "NA",
+        AssessmentComponent
+    )]
+
+
+    unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}, cache = sag_cache)
+
+build_SAG_map_for_active_year <- function(active_year, sid_dt, is_latest = TRUE) {
+    active_year <- as.integer(active_year)
+    if (is_latest) {
+        return(getSAG_latest_map())
+    }
+
+    # Historical: fetch only years implied by SID snapshot
+    setDT(sid_dt)
+    yrs <- sort(unique(as.integer(sid_dt$YearOfLastAssessment)))
+    yrs <- yrs[!is.na(yrs) & yrs != 0 & yrs <= active_year]
+    if (!(active_year %in% yrs)) yrs <- c(yrs, active_year)
+    if (length(yrs) == 0) {
+        return(data.table())
+    }
+
+    sag_all <- rbindlist(lapply(yrs, getSAG_year_map), fill = TRUE)
+    sag_all <- sag_all[AssessmentYear <= active_year]
+    unique(sag_all, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}
+
+filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
+    setDT(sag_dt)
+    setDT(asd_dt)
+
+    if (nrow(sag_dt) == 0 || nrow(asd_dt) == 0) {
+        return(sag_dt[0])
+    }
+
+    # 1) match by AssessmentKey where possible
+    a1 <- asd_dt[!is.na(AssessmentKey), .(AssessmentKey)]
+    setkey(a1, AssessmentKey)
+    sag1 <- sag_dt[a1, on = "AssessmentKey", nomatch = 0]
+
+    # 2) fallback: stock+year match for ASD rows with missing AssessmentKey
+    a2 <- asd_dt[is.na(AssessmentKey), .(StockKeyLabel, AssessmentYear)]
+    if (nrow(a2) > 0) {
+        setkey(a2, StockKeyLabel, AssessmentYear)
+        setkey(sag_dt, StockKeyLabel, AssessmentYear)
+        sag2 <- sag_dt[a2, nomatch = 0]
+        sag_keep <- unique(rbindlist(list(sag1, sag2), fill = TRUE),
+            by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent")
+        )
+    } else {
+        sag_keep <- unique(sag1, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+    }
+
+    sag_keep[]
+}

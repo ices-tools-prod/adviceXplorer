@@ -1,22 +1,12 @@
-msg <- function(...) {
-  emph <- "\n****************\n"
-  cat(emph, ..., emph)
-}
-
-
 # required if using most recent version of sf
 sf::sf_use_s2(FALSE)
-
-
-
-
 
 
 
 ############# Start server function ################
 
 server <- function(input, output, session) {
-  msg("server loop start:\n  ", getwd())
+  
   shinyjs::disable(selector = '.navbar-nav a[data-value="Development over time"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
@@ -116,48 +106,37 @@ server <- function(input, output, session) {
       base %>%
         select(
           "StockDisplay",
-          # "AssessmentComponent",
           "EcoRegion",
           "icon",
           "SpeciesCommonName",
           "AssessmentYear",
           "stock_location"
         ) %>%
-        # mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
         rename(
           "Stock code (component)" = StockDisplay,
-          # "Component" = AssessmentComponent,
           "Ecoregion" = EcoRegion,
           " " = icon,
           "Common name" = SpeciesCommonName,
           "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) # %>%
-      # {
-      #   if (all(nchar(.$Component) == 0)) select(., -Component) else .
-      # }
+        )
     } else {
       base %>%
         select(
           "StockDisplay",
-          # "AssessmentComponent",
           "icon",
           "SpeciesCommonName",
           "AssessmentYear",
           "stock_location"
         ) %>%
-        # mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
+        
         rename(
           "Stock code (component)" = StockDisplay,
-          # "Component" = AssessmentComponent,
           " " = icon,
           "Common name" = SpeciesCommonName,
           "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) # %>%
-      # {
-      #   if (all(nchar(.$Component) == 0)) select(., -Component) else .
-      # }
+        )       
     }
   })
 
@@ -308,19 +287,17 @@ server <- function(input, output, session) {
     info <- getStockInfoFromSAG(query$assessmentkey)
 
     query$stockkeylabel <- info$StockKeyLabel
-    query$year <- info$AssessmentYear ####
+    query$year <- info$AssessmentYear
     query$sagStamp <- info$SAGStamp
 
     stock_name <- query$stockkeylabel
-    msg("downloading:", stock_name)
+    
 
-    year <- query$year #####
-    msg("downloading:", year)
-    # filtered_row <- res_mod()[selected(), ]
-    #   # Dowload the data
+    year <- query$year 
+    
+   
     getSAGData(query$assessmentkey)
-    # getSAGData(stock_code = stock_name, year = filtered_row$YearOfLastAssessment) %>%
-    #   filter(AssessmentKey == query$assessmentkey)
+    
   })
 
   sagSettings <- reactive({
@@ -526,16 +503,7 @@ server <- function(input, output, session) {
     suppressWarnings(ICES_plot_7(advice_action_quality(), sagSettings(), query$sagStamp))
   })
 
-  
-  replace_na_with_na_string <- function(assessment_component) {
-    if (is.na(assessment_component) || assessment_component == "NA") {
-      return("N.A.")
-    } else {
-      return(assessment_component)
-    }
-  }
-
-  
+    
   advice_view_info <- reactive({
     req(query$assessmentkey)
     dt <- asd_cache()
