@@ -526,27 +526,7 @@ server <- function(input, output, session) {
     suppressWarnings(ICES_plot_7(advice_action_quality(), sagSettings(), query$sagStamp))
   })
 
-  #### this function is used to replace N.A. with NA in the assessment component, it's just a placeholder
-  # until I fix the ASD package
-  # replace_na_with_na_string <- function(assessment_component) {
-  #   if (assessment_component == "NA") {
-  #     return("N.A.")
-  #   } else {
-  #     return(assessment_component)
-  #   }
-  # }
-  # ##### ASD info
-  # advice_view_info <- reactive({
-  #   browser()
-  #   asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-  #   if (!is_empty(asd_record)) {
-  #     asd_record <- asd_record %>% filter(
-  #       adviceViewPublished == TRUE,
-  #       adviceStatus == "Advice",
-  #       adviceComponent == replace_na_with_na_string(query$assessmentcomponent)
-  #     )
-  #   }
-  # })
+  
   replace_na_with_na_string <- function(assessment_component) {
     if (is.na(assessment_component) || assessment_component == "NA") {
       return("N.A.")
@@ -555,19 +535,7 @@ server <- function(input, output, session) {
     }
   }
 
-  # advice_view_info <- reactive({
-  #   asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-
-  #   if (!is_empty(asd_record)) {
-  #     target_component <- replace_na_with_na_string(query$assessmentcomponent)
-
-  #     asd_record <- asd_record %>% filter(
-  #       adviceViewPublished == TRUE,
-  #       adviceStatus == "Advice",
-  #       adviceComponent == target_component | (is.na(adviceComponent) & target_component == "N.A.")
-  #     )
-  #   }
-  # })
+  
   advice_view_info <- reactive({
     req(query$assessmentkey)
     dt <- asd_cache()
@@ -581,7 +549,7 @@ server <- function(input, output, session) {
     if (!nrow(out)) {
       return(NULL)
     }
-    browser()
+    
     pick_asd_record_for_year(
       df = out,
       active_year = input$selected_years,

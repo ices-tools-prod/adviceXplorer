@@ -1,3 +1,8 @@
+## To be run on your local machine to build the SID cache, which is then committed
+# to the repo and deployed with the app. 
+#This is a one-time operation, and you can re-run it if you want 
+#to update the cache with new data in the future.
+
 # Choose a cache dir inside your repo so it gets deployed with the app
 SID_CACHE_DIR <- "App/Data/SID_cache"
 
