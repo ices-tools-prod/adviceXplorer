@@ -550,23 +550,12 @@ server <- function(input, output, session) {
       return(NULL)
     }
 
-    # If you still want component filtering, keep it. Otherwise just key by AssessmentKey.
-    # target_component <- replace_na_with_na_string(query$assessmentcomponent)
 
     out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
     if (!nrow(out)) {
       return(NULL)
     }
 
-    # # optional component filter (only if you still need it)
-    # out <- out[
-    #   adviceComponent == target_component |
-    #     (is.na(adviceComponent) & target_component == "N.A.")
-    # ]
-
-    # if (!nrow(out)) {
-    #   return(NULL)
-    # }
     out[1]
   })
 

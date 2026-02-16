@@ -314,11 +314,37 @@ filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
 # -----------------------------------------------------------------------------
 # Final stock list for UI: SID rows (ecoregions) + SAG cols, only if ASD published
 # -----------------------------------------------------------------------------
+# getStockList_for_active_year <- function(active_year, asd_pub) {
+#     sid <- getSID_meta(active_year)
+
+#     # ASD is now PROVIDED, not built here
+#     if (is.null(asd_pub) || nrow(asd_pub) == 0) {
+#         return(sid[0])
+#     }
+
+#     latest <- latest_sid_cache_year()
+#     sag_map <- if (!is.na(latest) && as.integer(active_year) == latest) {
+#         getSAG_latest_map()
+#     } else {
+#         build_SAG_map_for_active_year(active_year, sid, is_latest = FALSE)
+#     }
+
+#     sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
+#     if (nrow(sag_pub) == 0) {
+#         return(sid[0])
+#     }
+
+#     # IMPORTANT: collapse to one row per stock BEFORE joining to SID
+#     sag_pub <- keep_latest_assessment(sag_pub, by_component = FALSE)
+#     # (by_component=FALSE means "one per StockKeyLabel"; TRUE would keep one per component)
+
+#     out <- sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
+#     out[]
+# }
+
 getStockList_for_active_year <- function(active_year, asd_pub) {
   sid <- getSID_meta(active_year)
-
-  # ASD is now PROVIDED, not built here
-  if (is.null(asd_pub) || nrow(asd_pub) == 0) return(sid[0])
+  if (is.null(asd_pub) || !nrow(asd_pub)) return(sid[0])
 
   latest <- latest_sid_cache_year()
   sag_map <- if (!is.na(latest) && as.integer(active_year) == latest) {
@@ -328,11 +354,15 @@ getStockList_for_active_year <- function(active_year, asd_pub) {
   }
 
   sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
-  if (nrow(sag_pub) == 0) return(sid[0])
+  if (!nrow(sag_pub)) return(sid[0])
 
-  sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
+  # KEY LINE: remove duplicates per Stock+Component
+  sag_pub <- keep_latest_assessment_by_component(sag_pub)
+
+  out <- sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
+  data.table::setorder(out, StockKeyLabel, AssessmentComponent, EcoRegion)
+  out[]
 }
-
 
 
 
@@ -441,27 +471,52 @@ latest_sid_cache_year <- function(dir = SID_CACHE_DIR) {
   max(yrs)
 }
 
-# Keep only the most recent assessment per stock (optionally per component)
-keep_latest_assessment <- function(dt, by_component = TRUE) {
+# # Keep only the most recent assessment per stock (optionally per component)
+# keep_latest_assessment <- function(dt, by_component = TRUE) {
+#   data.table::setDT(dt)
+#   if (nrow(dt) == 0) return(dt)
+
+#   # enforce types to make ordering stable
+#   dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+#   dt[, AssessmentKey  := suppressWarnings(as.integer(AssessmentKey))]
+#   dt[, AssessmentComponent := as.character(AssessmentComponent)]
+
+#   # drop rows with missing year (cannot rank)
+#   dt <- dt[!is.na(AssessmentYear)]
+
+#   if (by_component) {
+#     data.table::setorder(dt, StockKeyLabel, AssessmentComponent, -AssessmentYear, -AssessmentKey)
+#     dt <- dt[, .SD[1], by = .(StockKeyLabel, AssessmentComponent)]
+#   } else {
+#     data.table::setorder(dt, StockKeyLabel, -AssessmentYear, -AssessmentKey)
+#     dt <- dt[, .SD[1], by = .(StockKeyLabel)]
+#   }
+
+#   dt[]
+# }
+
+
+normalise_component <- function(x) {
+  x <- as.character(x)
+  x[is.na(x) | x %in% c("", "N.A.", "N.A", "NA")] <- "NA"
+  x
+} 
+
+
+
+keep_latest_assessment_by_component <- function(dt) {
   data.table::setDT(dt)
-  if (nrow(dt) == 0) return(dt)
+  if (!nrow(dt)) return(dt)
 
-  # enforce types to make ordering stable
+  dt[, StockKeyLabel := as.character(StockKeyLabel)]
+  dt[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
   dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
-  dt[, AssessmentKey  := suppressWarnings(as.integer(AssessmentKey))]
-  dt[, AssessmentComponent := as.character(AssessmentComponent)]
+  dt[, AssessmentComponent := normalise_component(AssessmentComponent)]
 
-  # drop rows with missing year (cannot rank)
-  dt <- dt[!is.na(AssessmentYear)]
+  dt <- dt[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) & !is.na(AssessmentYear)]
 
-  if (by_component) {
-    data.table::setorder(dt, StockKeyLabel, AssessmentComponent, -AssessmentYear, -AssessmentKey)
-    dt <- dt[, .SD[1], by = .(StockKeyLabel, AssessmentComponent)]
-  } else {
-    data.table::setorder(dt, StockKeyLabel, -AssessmentYear, -AssessmentKey)
-    dt <- dt[, .SD[1], by = .(StockKeyLabel)]
-  }
-
+  data.table::setorder(dt, StockKeyLabel, AssessmentComponent, -AssessmentYear, -AssessmentKey)
+  dt <- dt[, .SD[1], by = .(StockKeyLabel, AssessmentComponent)]
   dt[]
 }
 
