@@ -21,9 +21,9 @@ server <- function(input, output, session) {
   shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
 
-  
 
-  
+
+
   ############################################################################################
   # values of the query string and first visit flag
   query <- reactiveValues(query_from_table = FALSE)
@@ -32,35 +32,61 @@ server <- function(input, output, session) {
   map_panel_server(input, output, session)
 
   asd_cache <- reactive({
-  req(input$selected_years)
-  sid <- getSID_meta(input$selected_years)
-  build_ASD_cache_for_active_year(input$selected_years, sid)
-}) %>%
-  bindCache(input$selected_years) %>%
-  bindEvent(input$selected_years)
+    req(input$selected_years)
+    sid <- getSID_meta(input$selected_years)
+    build_ASD_cache_for_active_year(input$selected_years, sid)
+  }) %>%
+    bindCache(input$selected_years) %>%
+    bindEvent(input$selected_years)
+
+  asd_pub <- reactive({
+    dt <- asd_cache()
+    if (is.null(dt) || !nrow(dt)) {
+      return(data.table::data.table())
+    }
+
+    data.table::setDT(dt)
+
+    # keep keys for matching; include StockKeyLabel+AssessmentYear for fallback
+    out <- dt[, .(
+      AssessmentKey,
+      StockKeyLabel,
+      AssessmentYear
+    )]
+
+    # ensure types are consistent
+    out[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+    out[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+    out[, StockKeyLabel := as.character(StockKeyLabel)]
+
+    unique(out, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
+  }) %>%
+    bindCache(input$selected_years) %>%
+    bindEvent(input$selected_years)
 
 
   ############################ Stock selection table server ######################################
   eco_filter <- reactive({
-  req(input$selected_locations, input$selected_years)
+    req(input$selected_locations, input$selected_years)
 
-  asd_pub <- asd_cache()  # <- triggers ASD build once per selected_years
-  stock_list_long <- getStockList_for_active_year(
-    active_year = input$selected_years,
-    asd_pub = asd_pub
-  )
+    asd_pub_dt <- asd_pub() # use the reactive
+    stock_list_long <- getStockList_for_active_year(
+      active_year = input$selected_years,
+      asd_pub = asd_pub_dt
+    )
 
-  stock_list_long <- purrr::map_dfr(
-    .x = input$selected_locations,
-    .f = function(.x) stock_list_long %>% dplyr::filter(stringr::str_detect(EcoRegion, .x))
-  )
+    stock_list_long <- purrr::map_dfr(
+      .x = input$selected_locations,
+      .f = function(.x) stock_list_long %>% dplyr::filter(stringr::str_detect(EcoRegion, .x))
+    )
 
-  if (nrow(stock_list_long) != 0) {
-    stock_list_long %>% dplyr::arrange(StockKeyLabel)
-  }
-}) %>%
-  bindCache(input$selected_locations, input$selected_years) %>%
-  bindEvent(input$selected_locations, input$selected_years)
+    if (nrow(stock_list_long) != 0) {
+      stock_list_long %>% dplyr::arrange(StockKeyLabel)
+    }
+  }) %>%
+    bindCache(input$selected_locations, input$selected_years) %>%
+    bindEvent(input$selected_locations, input$selected_years)
+
 
 
 
@@ -77,7 +103,7 @@ server <- function(input, output, session) {
       need(!nrow(eco_filter()) == 0, "No published stocks in the selected ecoregion and year")
     )
 
-   base <- res_mod() %>%
+    base <- res_mod() %>%
       mutate(
         Component_clean = ifelse(is.na(AssessmentComponent) | AssessmentComponent %in% c("NA", "N.A.", ""), "", AssessmentComponent),
         StockDisplay = ifelse(Component_clean == "",
@@ -545,7 +571,7 @@ server <- function(input, output, session) {
   advice_view_info <- reactive({
     req(query$assessmentkey)
     dt <- asd_cache()
-    
+
     if (is.null(dt) || !nrow(dt)) {
       return(NULL)
     }
@@ -555,12 +581,12 @@ server <- function(input, output, session) {
     if (!nrow(out)) {
       return(NULL)
     }
+    browser()
     pick_asd_record_for_year(
-      df = asd_record,
-      active_year = query$active_year,
+      df = out,
+      active_year = input$selected_years,
       assessment_component = query$assessmentcomponent
     )
-    out[1]
   })
 
 
