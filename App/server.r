@@ -555,7 +555,11 @@ server <- function(input, output, session) {
     if (!nrow(out)) {
       return(NULL)
     }
-
+    pick_asd_record_for_year(
+      df = asd_record,
+      active_year = query$active_year,
+      assessment_component = query$assessmentcomponent
+    )
     out[1]
   })
 
