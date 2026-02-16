@@ -314,11 +314,11 @@ filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
 # -----------------------------------------------------------------------------
 # Final stock list for UI: SID rows (ecoregions) + SAG cols, only if ASD published
 # -----------------------------------------------------------------------------
-getStockList_for_active_year <- function(active_year) {
+getStockList_for_active_year <- function(active_year, asd_pub) {
   sid <- getSID_meta(active_year)
 
-  asd_pub <- build_ASD_published_index_for_active_year(active_year, sid)
-  if (nrow(asd_pub) == 0) return(sid[0])
+  # ASD is now PROVIDED, not built here
+  if (is.null(asd_pub) || nrow(asd_pub) == 0) return(sid[0])
 
   latest <- latest_sid_cache_year()
   sag_map <- if (!is.na(latest) && as.integer(active_year) == latest) {
@@ -330,11 +330,9 @@ getStockList_for_active_year <- function(active_year) {
   sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
   if (nrow(sag_pub) == 0) return(sid[0])
 
-  # NEW: collapse to latest per stock-component (or set FALSE for one row per stock)
-  sag_pub <- keep_latest_assessment(sag_pub, by_component = TRUE)
-
   sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
 }
+
 
 
 
@@ -466,3 +464,95 @@ keep_latest_assessment <- function(dt, by_component = TRUE) {
 
   dt[]
 }
+
+
+# -----------------------------------------------------------------------------
+# ASD: thin cache per year (published advice only), keyed by AssessmentKey
+# -----------------------------------------------------------------------------
+asd_thin_year_cache <- cachem::cache_mem(max_age = 24 * 3600)
+
+getASD_thin_year <- memoise::memoise(function(y) {
+  dt <- icesASD::getAdviceViewRecord(year = as.integer(y))
+
+  # Robust empty handling (ASD can return [] for future years)
+  if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+    return(data.table::data.table())
+  }
+
+  data.table::setDT(dt)
+
+  # Keep only published advice rows
+  dt <- dt[adviceViewPublished == TRUE & adviceStatus == "Advice"]
+  if (nrow(dt) == 0) return(data.table::data.table())
+
+  # Normalise types up-front
+  dt[, assessmentKey  := suppressWarnings(as.integer(assessmentKey))]
+  dt[, assessmentYear := suppressWarnings(as.integer(assessmentYear))]
+  dt[, adviceKey      := suppressWarnings(as.integer(adviceKey))]
+
+  # Keep only columns you want later (plus stockCode/assessmentYear for diagnostics)
+  out <- dt[, .(
+    AssessmentKey      = assessmentKey,
+    AssessmentYear     = assessmentYear,
+    StockKeyLabel      = stockCode,
+
+    adviceSentence     = adviceSentence,
+    adviceDOI          = adviceDOI,
+    adviceStatus       = adviceStatus,
+    adviceValue        = adviceValue,
+    adviceReleasedDate = adviceReleasedDate,
+    adviceKey          = adviceKey
+  )]
+
+  out <- out[!is.na(AssessmentKey) & !is.na(AssessmentYear)]
+  out[]
+}, cache = asd_thin_year_cache)
+
+build_ASD_cache_for_active_year <- function(active_year, sid_dt) {
+  active_year <- as.integer(active_year)
+  data.table::setDT(sid_dt)
+
+  yrs <- sort(unique(as.integer(sid_dt$YearOfLastAssessment)))
+  yrs <- yrs[!is.na(yrs) & yrs != 0 & yrs <= active_year]
+  if (!(active_year %in% yrs)) yrs <- c(yrs, active_year)
+  if (!length(yrs)) return(data.table::data.table())
+
+  asd_all <- data.table::rbindlist(lapply(yrs, function(y) {
+    dt <- icesASD::getAdviceViewRecord(year = y)
+
+    if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+      return(data.table::data.table())
+    }
+    data.table::setDT(dt)
+
+    # Keep only what your app cares about, but KEEP the later-needed fields
+    dt <- dt[adviceViewPublished == TRUE & adviceStatus == "Advice"]
+
+    if (!nrow(dt)) return(data.table::data.table())
+
+    dt[, .(
+      StockKeyLabel       = stockCode,
+      AssessmentKey       = suppressWarnings(as.integer(assessmentKey)),
+      AssessmentYear      = suppressWarnings(as.integer(assessmentYear)),
+      adviceKey           = suppressWarnings(as.integer(adviceKey)),
+      adviceSentence      = adviceSentence,
+      adviceDOI           = adviceDOI,
+      adviceStatus        = adviceStatus,
+      adviceValue         = adviceValue,
+      adviceReleasedDate  = adviceReleasedDate,
+      adviceApplicableUntil = adviceApplicableUntil,
+      adviceComponent     = adviceComponent
+    )]
+  }), fill = TRUE)
+
+  if (!nrow(asd_all)) return(asd_all)
+
+  # de-dupe: pick latest record per assessmentKey (or per stock/year if you prefer)
+  data.table::setorder(asd_all, AssessmentKey, -AssessmentYear, -adviceKey)
+  asd_all <- asd_all[!is.na(AssessmentKey)]
+  asd_all <- asd_all[, .SD[1], by = .(AssessmentKey)]
+
+  data.table::setkey(asd_all, AssessmentKey)
+  asd_all[]
+}
+

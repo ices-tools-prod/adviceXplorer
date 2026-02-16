@@ -3338,7 +3338,8 @@ library(icesSAG)
 getSAGGraphs(19287)
 
 
-icesASD::getAdviceViewRecord(year = 2025)
+test <- icesASD::getAdviceViewRecord(year = 2025)
+head(test)
 icesASD::get_catch_scenario_table(3876)
 icesSAG::getSAGGraphs(19277)
 icesSAG::getListStocks(assessmentKey = 19277)

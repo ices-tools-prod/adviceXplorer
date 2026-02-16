@@ -31,28 +31,37 @@ server <- function(input, output, session) {
   ############################ Map panel server ##############################################
   map_panel_server(input, output, session)
 
-  
+  asd_cache <- reactive({
+  req(input$selected_years)
+  sid <- getSID_meta(input$selected_years)
+  build_ASD_cache_for_active_year(input$selected_years, sid)
+}) %>%
+  bindCache(input$selected_years) %>%
+  bindEvent(input$selected_years)
+
+
   ############################ Stock selection table server ######################################
   eco_filter <- reactive({
-    req(input$selected_locations, input$selected_years)
+  req(input$selected_locations, input$selected_years)
 
-    # stock_list_long <- fread(sprintf("Data/SID_%s/SID.csv", input$selected_years))
-    # stock_list_long <- getSID(input$selected_years)
-    stock_list_long <- getStockList_for_active_year(active_year = input$selected_years)
+  asd_pub <- asd_cache()  # <- triggers ASD build once per selected_years
+  stock_list_long <- getStockList_for_active_year(
+    active_year = input$selected_years,
+    asd_pub = asd_pub
+  )
 
-    
-    stock_list_long <- purrr::map_dfr(
-      .x = input$selected_locations,
-      .f = function(.x) stock_list_long %>% dplyr::filter(str_detect(EcoRegion, .x))
-    )
+  stock_list_long <- purrr::map_dfr(
+    .x = input$selected_locations,
+    .f = function(.x) stock_list_long %>% dplyr::filter(stringr::str_detect(EcoRegion, .x))
+  )
 
-    if (nrow(stock_list_long) != 0) {
-      stock_list_long %>%
-        dplyr::arrange(StockKeyLabel)
-    }
-  }) %>%
-    bindCache(input$selected_locations, input$selected_years) %>%
-    bindEvent(input$selected_locations, input$selected_years)
+  if (nrow(stock_list_long) != 0) {
+    stock_list_long %>% dplyr::arrange(StockKeyLabel)
+  }
+}) %>%
+  bindCache(input$selected_locations, input$selected_years) %>%
+  bindEvent(input$selected_locations, input$selected_years)
+
 
 
   res_mod <- select_group_server(
@@ -144,11 +153,19 @@ server <- function(input, output, session) {
           filterable = FALSE,
           align = "center",
           aggregate = "unique"
+        ),
+        "Assessment year" = colDef(
+          align = "left",
+          width = 90, # try 70–110
+          minWidth = 70,
+          maxWidth = 110
+        ),
+        "Common name" = colDef(
+          align = "left",
+          width = 110, # try 70–110
+          minWidth = 100,
+          maxWidth = 120
         )
-        # "Year of last assessment" = colDef(
-        #   filterable = TRUE,
-        #   align = "left"
-        # )
       ),
       theme = reactableTheme(
         stripedColor = "#eff2f5",
@@ -512,19 +529,47 @@ server <- function(input, output, session) {
     }
   }
 
+  # advice_view_info <- reactive({
+  #   asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
+
+  #   if (!is_empty(asd_record)) {
+  #     target_component <- replace_na_with_na_string(query$assessmentcomponent)
+
+  #     asd_record <- asd_record %>% filter(
+  #       adviceViewPublished == TRUE,
+  #       adviceStatus == "Advice",
+  #       adviceComponent == target_component | (is.na(adviceComponent) & target_component == "N.A.")
+  #     )
+  #   }
+  # })
   advice_view_info <- reactive({
-    asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-
-    if (!is_empty(asd_record)) {
-      target_component <- replace_na_with_na_string(query$assessmentcomponent)
-
-      asd_record <- asd_record %>% filter(
-        adviceViewPublished == TRUE,
-        adviceStatus == "Advice",
-        adviceComponent == target_component | (is.na(adviceComponent) & target_component == "N.A.")
-      )
+    req(query$assessmentkey)
+    dt <- asd_cache()
+    
+    if (is.null(dt) || !nrow(dt)) {
+      return(NULL)
     }
+
+    # If you still want component filtering, keep it. Otherwise just key by AssessmentKey.
+    # target_component <- replace_na_with_na_string(query$assessmentcomponent)
+
+    out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
+    if (!nrow(out)) {
+      return(NULL)
+    }
+
+    # # optional component filter (only if you still need it)
+    # out <- out[
+    #   adviceComponent == target_component |
+    #     (is.na(adviceComponent) & target_component == "N.A.")
+    # ]
+
+    # if (!nrow(out)) {
+    #   return(NULL)
+    # }
+    out[1]
   })
+
 
 
 
