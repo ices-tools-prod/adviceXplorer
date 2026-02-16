@@ -199,7 +199,7 @@ adviceXplorer_stocks_to_exclude_for_lunch <- c("cod.27.1-2",
 download_SID <- function(Year) {
   stock_list_all <- jsonlite::fromJSON(
     URLencode(
-      sprintf("http://sd.ices.dk/services/odata4/StockListDWs4?$filter=ActiveYear eq %s&$select=StockKeyLabel, StockKeyDescription, SpeciesCommonName, EcoRegion, DataCategory, YearOfLastAssessment, AssessmentFrequency, YearOfNextAssessment, AssessmentKey", Year)
+      sprintf("http://sd.ices.dk/services/odata4/StockListDWs4?$filter=ActiveYear eq %s&$select=StockKeyLabel, StockKeyDescription, SpeciesCommonName, EcoRegion, YearOfLastAssessment, AssessmentFrequency, YearOfNextAssessment, AssessmentKey", Year)
     )
   )$value
   # stock_list_all <- stock_list_all %>% filter(!StockKeyLabel %in% adviceXplorer_stocks_to_exclude_for_lunch)
@@ -297,10 +297,38 @@ parse_location_from_stock_description <- function(stock_description) {
 
 match_stockcode_to_illustration <- function(StockKeyLabel, df) {
   sapply(StockKeyLabel, function(key) {
-    temp <- list.files("www", pattern = substr(key, 1, 3))
+    temp <- list.files("App/www", pattern = substr(key, 1, 3))
     if (length(temp) == 0) "fish.png" else temp[1]
   })
 }
+
+match_stockcode_to_illustration_offline <- function(stock_codes,
+                                                    disk_www_dir = "App/www",
+                                                    web_prefix = "",      # "" if files are directly under www; "icons/" if under www/icons
+                                                    default = "fish.png") {
+  stock_codes <- as.character(stock_codes)
+
+  if (!dir.exists(disk_www_dir)) {
+    stop("disk_www_dir does not exist: ", normalizePath(disk_www_dir, winslash = "/", mustWork = FALSE))
+  }
+
+  sapply(stock_codes, function(key) {
+    prefix <- tolower(substr(key, 1, 3))
+
+    files <- list.files(
+      disk_www_dir,
+      pattern = paste0("^", prefix, ".*\\.(png|jpg|jpeg|svg)$"),
+      ignore.case = TRUE,
+      full.names = FALSE
+    )
+
+    chosen <- if (length(files) == 0) default else files[1]
+
+    # What you store in the SID cache (runtime src)
+    paste0(web_prefix, chosen)
+  }, USE.NAMES = FALSE)
+}
+
 #' Returns the HTML string to create the hyperlink to the SAG database
 #'
 #' @param assessmentKey

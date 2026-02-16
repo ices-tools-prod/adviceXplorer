@@ -45,6 +45,7 @@ library(promises)
 library(data.table)
 library(memoise)
 library(future.apply)
+library(cachem)
 
 plan(multisession) # Enable parallel execution
 

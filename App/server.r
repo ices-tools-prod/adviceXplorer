@@ -37,7 +37,11 @@ server <- function(input, output, session) {
     req(input$selected_locations, input$selected_years)
 
     # stock_list_long <- fread(sprintf("Data/SID_%s/SID.csv", input$selected_years))
-    stock_list_long <- getSID(input$selected_years)
+    # stock_list_long <- getSID(input$selected_years)
+    stock_list_long <- getStockList_for_active_year(active_year = input$selected_years)
+
+    browser()
+    head(stock_list_long)
     stock_list_long <- purrr::map_dfr(
       .x = input$selected_locations,
       .f = function(.x) stock_list_long %>% dplyr::filter(str_detect(EcoRegion, .x))
