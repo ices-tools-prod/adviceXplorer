@@ -220,12 +220,15 @@ getSAG_latest_map <- memoise(function() {
   out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
              !is.na(AssessmentKey) & !is.na(AssessmentYear)]
 
-  # Normalise component string
-  out[, AssessmentComponent := fifelse(
-    is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
-    "NA",
-    AssessmentComponent
-  )]
+  # Ensure it's character before fifelse (older years may return numeric/factor)
+out[, AssessmentComponent := as.character(AssessmentComponent)]
+
+out[, AssessmentComponent := data.table::fifelse(
+  is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+  "NA",
+  AssessmentComponent
+)]
+
 
   unique(out, by = c("StockKeyLabel","AssessmentKey","AssessmentYear","AssessmentComponent"))
 }, cache = sag_cache)
@@ -246,12 +249,15 @@ getSAG_year_map <- memoise(function(y) {
   out <- dt[, .(StockKeyLabel, AssessmentKey, AssessmentYear, AssessmentComponent)]
   out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
              !is.na(AssessmentKey) & !is.na(AssessmentYear)]
+  # Ensure it's character before fifelse (older years may return numeric/factor)
+out[, AssessmentComponent := as.character(AssessmentComponent)]
 
-  out[, AssessmentComponent := fifelse(
-    is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
-    "NA",
-    AssessmentComponent
-  )]
+out[, AssessmentComponent := data.table::fifelse(
+  is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+  "NA",
+  AssessmentComponent
+)]
+
 
   unique(out, by = c("StockKeyLabel","AssessmentKey","AssessmentYear","AssessmentComponent"))
 }, cache = sag_cache)
@@ -310,6 +316,7 @@ filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
 # -----------------------------------------------------------------------------
 getStockList_for_active_year <- function(active_year) {
   sid <- getSID_meta(active_year)
+
   asd_pub <- build_ASD_published_index_for_active_year(active_year, sid)
   if (nrow(asd_pub) == 0) return(sid[0])
 
@@ -323,8 +330,12 @@ getStockList_for_active_year <- function(active_year) {
   sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
   if (nrow(sag_pub) == 0) return(sid[0])
 
+  # NEW: collapse to latest per stock-component (or set FALSE for one row per stock)
+  sag_pub <- keep_latest_assessment(sag_pub, by_component = TRUE)
+
   sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
 }
+
 
 
 
@@ -430,4 +441,28 @@ latest_sid_cache_year <- function(dir = SID_CACHE_DIR) {
   yrs <- yrs[!is.na(yrs)]
   if (!length(yrs)) return(NA_integer_)
   max(yrs)
+}
+
+# Keep only the most recent assessment per stock (optionally per component)
+keep_latest_assessment <- function(dt, by_component = TRUE) {
+  data.table::setDT(dt)
+  if (nrow(dt) == 0) return(dt)
+
+  # enforce types to make ordering stable
+  dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+  dt[, AssessmentKey  := suppressWarnings(as.integer(AssessmentKey))]
+  dt[, AssessmentComponent := as.character(AssessmentComponent)]
+
+  # drop rows with missing year (cannot rank)
+  dt <- dt[!is.na(AssessmentYear)]
+
+  if (by_component) {
+    data.table::setorder(dt, StockKeyLabel, AssessmentComponent, -AssessmentYear, -AssessmentKey)
+    dt <- dt[, .SD[1], by = .(StockKeyLabel, AssessmentComponent)]
+  } else {
+    data.table::setorder(dt, StockKeyLabel, -AssessmentYear, -AssessmentKey)
+    dt <- dt[, .SD[1], by = .(StockKeyLabel)]
+  }
+
+  dt[]
 }

@@ -40,8 +40,7 @@ server <- function(input, output, session) {
     # stock_list_long <- getSID(input$selected_years)
     stock_list_long <- getStockList_for_active_year(active_year = input$selected_years)
 
-    browser()
-    head(stock_list_long)
+    
     stock_list_long <- purrr::map_dfr(
       .x = input$selected_locations,
       .f = function(.x) stock_list_long %>% dplyr::filter(str_detect(EcoRegion, .x))
@@ -69,52 +68,61 @@ server <- function(input, output, session) {
       need(!nrow(eco_filter()) == 0, "No published stocks in the selected ecoregion and year")
     )
 
+   base <- res_mod() %>%
+      mutate(
+        Component_clean = ifelse(is.na(AssessmentComponent) | AssessmentComponent %in% c("NA", "N.A.", ""), "", AssessmentComponent),
+        StockDisplay = ifelse(Component_clean == "",
+          StockKeyLabel,
+          paste0(StockKeyLabel, " (", Component_clean, ")")
+        )
+      )
+
     if (length(input$selected_locations) > 1) {
-      res_mod() %>%
+      base %>%
         select(
-          "StockKeyLabel",
-          "AssessmentComponent",
+          "StockDisplay",
+          # "AssessmentComponent",
           "EcoRegion",
           "icon",
           "SpeciesCommonName",
-          # "YearOfLastAssessment",
+          "AssessmentYear",
           "stock_location"
         ) %>%
-        mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
+        # mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
         rename(
-          "Stock code" = StockKeyLabel,
-          "Component" = AssessmentComponent,
+          "Stock code (component)" = StockDisplay,
+          # "Component" = AssessmentComponent,
           "Ecoregion" = EcoRegion,
           " " = icon,
           "Common name" = SpeciesCommonName,
-          # "Year of last assessment" = YearOfLastAssessment,
+          "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) %>%
-        {
-          if (all(nchar(.$Component) == 0)) select(., -Component) else .
-        }
+        ) # %>%
+      # {
+      #   if (all(nchar(.$Component) == 0)) select(., -Component) else .
+      # }
     } else {
-      res_mod() %>%
+      base %>%
         select(
-          "StockKeyLabel",
-          "AssessmentComponent",
+          "StockDisplay",
+          # "AssessmentComponent",
           "icon",
           "SpeciesCommonName",
-          # "YearOfLastAssessment",
+          "AssessmentYear",
           "stock_location"
         ) %>%
-        mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
+        # mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
         rename(
-          "Stock code" = StockKeyLabel,
-          "Component" = AssessmentComponent,
+          "Stock code (component)" = StockDisplay,
+          # "Component" = AssessmentComponent,
           " " = icon,
           "Common name" = SpeciesCommonName,
-          # "Year of last assessment" = YearOfLastAssessment,
+          "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) %>%
-        {
-          if (all(nchar(.$Component) == 0)) select(., -Component) else .
-        }
+        ) # %>%
+      # {
+      #   if (all(nchar(.$Component) == 0)) select(., -Component) else .
+      # }
     }
   })
 
