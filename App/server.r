@@ -6,76 +6,243 @@ sf::sf_use_s2(FALSE)
 ############# Start server function ################
 
 server <- function(input, output, session) {
-  
   shinyjs::disable(selector = '.navbar-nav a[data-value="Development over time"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
 
 
 
+  show_startup_modal <- function(session, title = "Loading data") {
+    showModal(modalDialog(
+      title = title,
+      easyClose = FALSE,
+      footer = NULL,
+      size = "m",
+      tagList(
+        tags$div(
+          style = "margin-top: 6px;",
+          tags$div(id = "startup-progress-text", style = "margin-bottom: 8px;", "Starting…"),
+          tags$div(
+            style = "height: 12px; background: #eee; border-radius: 6px; overflow: hidden;",
+            tags$div(
+              id = "startup-progress-bar",
+              style = "height: 100%; width: 0%; background: #f15d22;"
+            )
+          )
+        )
+      )
+    ))
+  }
 
-  ############################################################################################
+  update_startup_progress <- function(session, value, text) {
+    session$sendCustomMessage("startupProgress", list(value = value, text = text))
+  }
   # values of the query string and first visit flag
   query <- reactiveValues(query_from_table = FALSE)
 
-  ############################ Map panel server ##############################################
-  map_panel_server(input, output, session)
+  close_startup_modal <- function() removeModal()
+  # Centralised runtime store
+  rv <- reactiveValues(
+    sid = NULL,
+    asd = NULL,
+    asd_pub = data.table::data.table(),
+    stock_list = data.table::data.table(),
+    ready = FALSE,
+    last_year = NULL
+  )
 
-  asd_cache <- reactive({
-    req(input$selected_years)
-    sid <- getSID_meta(input$selected_years)
-    build_ASD_cache_for_active_year(input$selected_years, sid)
-  }) %>%
-    bindCache(input$selected_years) %>%
-    bindEvent(input$selected_years)
+  # Optional: progress modal helpers (uses your earlier modal/progress functions)
+  # If you haven't added them, you can comment these calls out.
+  .start_loading <- function(year) {
+    rv$ready <- FALSE
+    show_startup_modal(session, paste("Loading", year))
+    update_startup_progress(session, 5, "Reading SID snapshot…")
+  }
 
+  .fail_loading <- function(e) {
+    update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
+  }
+
+  .done_loading <- function() {
+    rv$ready <- TRUE
+    update_startup_progress(session, 100, "Done.")
+    close_startup_modal()
+  }
+
+
+  # Year pipeline: SID (disk) -> ASD (network) -> stock list (SAG join inside)
+  observeEvent(input$selected_years,
+    {
+      req(input$selected_years)
+      yr <- as.integer(input$selected_years)
+      rv$last_year <- yr
+      rv$ready <- FALSE
+
+      show_startup_modal(session, paste("Loading", yr))
+      update_startup_progress(session, 5, "Fetching SID…")
+
+      # 1) SID (disk)
+      p_sid <- future_promise({
+        getSID_meta(yr)
+      })
+
+      # 2) ASD (network) depends on SID
+      p_asd <- p_sid %...>% (function(sid) {
+        update_startup_progress(session, 20, "SID loaded. Fetching ASD…")
+        future_promise({
+          build_ASD_cache_for_active_year(yr, sid)
+        }) %...>% (function(asd) {
+          # store SID/ASD in main process (NOT in workers)
+          rv$sid <- sid
+          rv$asd <- asd
+          asd
+        })
+      })
+
+      # 3) Build asd_pub in MAIN, then pass it into worker
+      p_stock_list <- p_asd %...>% (function(asd) {
+        update_startup_progress(session, 55, "ASD loaded. Building stock list…")
+
+        asd_pub_dt <- data.table::data.table()
+        if (!is.null(asd) && nrow(asd)) {
+          dt <- data.table::as.data.table(asd)[, .(AssessmentKey, StockKeyLabel, AssessmentYear)]
+          dt[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+          dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+          dt[, StockKeyLabel := as.character(StockKeyLabel)]
+          asd_pub_dt <- unique(dt, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
+        }
+        rv$asd_pub <- asd_pub_dt # store for later use in server
+
+        # IMPORTANT: pass asd_pub_dt to the worker by value
+        future_promise({
+          getStockList_for_active_year(
+            active_year = yr,
+            asd_pub = asd_pub_dt
+          )
+        })
+      })
+
+      p_stock_list %...>% (function(stock_list) {
+        if (!identical(rv$last_year, yr)) {
+          return(NULL)
+        }
+
+        rv$stock_list <- data.table::as.data.table(stock_list)
+        update_startup_progress(session, 85, "Stock list ready. Rendering UI…")
+
+        rv$ready <- TRUE
+        update_startup_progress(session, 100, "Done.")
+        close_startup_modal()
+        NULL
+      }) %...!% (function(e) {
+        # show error, and DO close (or switch to easyClose TRUE)
+        update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
+        rv$ready <- FALSE
+        # either close, or leave open but allow closing
+        close_startup_modal()
+        showNotification(paste("Startup failed:", conditionMessage(e)), type = "error", duration = NULL)
+        NULL
+      })
+    },
+    ignoreInit = FALSE
+  )
+
+
+  # Published ASD accessor (replaces your asd_pub reactive)
   asd_pub <- reactive({
-    dt <- asd_cache()
+    rv$asd_pub
+  }) %>%
+    bindCache(input$selected_years, rv$ready) %>%
+    bindEvent(input$selected_years, rv$ready)
+
+
+  # eco_filter now consumes the prebuilt stock_list (NO heavy calls inside)
+  eco_filter <- reactive({
+    req(input$selected_locations, input$selected_years)
+
+    if (!isTRUE(rv$ready)) {
+      return(data.table::data.table()) # do not validate here
+    }
+
+    dt <- rv$stock_list
+    data.table::setDT(dt)
     if (is.null(dt) || !nrow(dt)) {
       return(data.table::data.table())
     }
 
-    data.table::setDT(dt)
+    out <- purrr::map_dfr(
+      .x = input$selected_locations,
+      .f = function(loc) dt %>% dplyr::filter(stringr::str_detect(EcoRegion, loc))
+    )
 
-    # keep keys for matching; include StockKeyLabel+AssessmentYear for fallback
-    out <- dt[, .(
-      AssessmentKey,
-      StockKeyLabel,
-      AssessmentYear
-    )]
-
-    # ensure types are consistent
-    out[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
-    out[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
-    out[, StockKeyLabel := as.character(StockKeyLabel)]
-
-    unique(out, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
+    if (nrow(out)) out %>% dplyr::arrange(StockKeyLabel) else out
   }) %>%
-    bindCache(input$selected_years) %>%
-    bindEvent(input$selected_years)
+    bindCache(input$selected_locations, input$selected_years, rv$ready) %>%
+    bindEvent(input$selected_locations, input$selected_years, rv$ready)
+
+
+  # ---- end async startup + year pipeline ---------------------------------------
+  ############################################################################################
+
+
+  ############################ Map panel server ##############################################
+  map_panel_server(input, output, session)
+
+  # asd_cache <- reactive({
+  #   req(input$selected_years)
+  #   sid <- getSID_meta(input$selected_years)
+  #   build_ASD_cache_for_active_year(input$selected_years, sid)
+  # }) %>%
+  #   bindCache(input$selected_years) %>%
+  #   bindEvent(input$selected_years)
+
+  # asd_pub <- reactive({
+  #   dt <- asd_cache()
+  #   if (is.null(dt) || !nrow(dt)) {
+  #     return(data.table::data.table())
+  #   }
+
+  #   data.table::setDT(dt)
+
+  #   # keep keys for matching; include StockKeyLabel+AssessmentYear for fallback
+  #   out <- dt[, .(
+  #     AssessmentKey,
+  #     StockKeyLabel,
+  #     AssessmentYear
+  #   )]
+
+  #   # ensure types are consistent
+  #   out[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+  #   out[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+  #   out[, StockKeyLabel := as.character(StockKeyLabel)]
+
+  #   unique(out, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
+  # }) %>%
+  #   bindCache(input$selected_years) %>%
+  #   bindEvent(input$selected_years)
 
 
   ############################ Stock selection table server ######################################
-  eco_filter <- reactive({
-    req(input$selected_locations, input$selected_years)
+  # eco_filter <- reactive({
+  #   req(input$selected_locations, input$selected_years)
 
-    asd_pub_dt <- asd_pub() # use the reactive
-    stock_list_long <- getStockList_for_active_year(
-      active_year = input$selected_years,
-      asd_pub = asd_pub_dt
-    )
+  #   asd_pub_dt <- asd_pub() # use the reactive
+  #   stock_list_long <- getStockList_for_active_year(
+  #     active_year = input$selected_years,
+  #     asd_pub = asd_pub_dt
+  #   )
 
-    stock_list_long <- purrr::map_dfr(
-      .x = input$selected_locations,
-      .f = function(.x) stock_list_long %>% dplyr::filter(stringr::str_detect(EcoRegion, .x))
-    )
+  #   stock_list_long <- purrr::map_dfr(
+  #     .x = input$selected_locations,
+  #     .f = function(.x) stock_list_long %>% dplyr::filter(stringr::str_detect(EcoRegion, .x))
+  #   )
 
-    if (nrow(stock_list_long) != 0) {
-      stock_list_long %>% dplyr::arrange(StockKeyLabel)
-    }
-  }) %>%
-    bindCache(input$selected_locations, input$selected_years) %>%
-    bindEvent(input$selected_locations, input$selected_years)
+  #   if (nrow(stock_list_long) != 0) {
+  #     stock_list_long %>% dplyr::arrange(StockKeyLabel)
+  #   }
+  # }) %>%
+  #   bindCache(input$selected_locations, input$selected_years) %>%
+  #   bindEvent(input$selected_locations, input$selected_years)
 
 
 
@@ -89,8 +256,12 @@ server <- function(input, output, session) {
   ###########################################################  Render stock selection table
 
   res_modo <- reactive({
+    if (!isTRUE(rv$ready)) {
+      validate(need(FALSE, "Loading stock list…"))
+    }
+
     validate(
-      need(!nrow(eco_filter()) == 0, "No published stocks in the selected ecoregion and year")
+      need(nrow(eco_filter()) != 0, "No published stocks in the selected ecoregion and year")
     )
 
     base <- res_mod() %>%
@@ -129,14 +300,13 @@ server <- function(input, output, session) {
           "AssessmentYear",
           "stock_location"
         ) %>%
-        
         rename(
           "Stock code (component)" = StockDisplay,
           " " = icon,
           "Common name" = SpeciesCommonName,
           "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        )       
+        )
     }
   })
 
@@ -291,13 +461,12 @@ server <- function(input, output, session) {
     query$sagStamp <- info$SAGStamp
 
     stock_name <- query$stockkeylabel
-    
 
-    year <- query$year 
-    
-   
+
+    year <- query$year
+
+
     getSAGData(query$assessmentkey)
-    
   })
 
   sagSettings <- reactive({
@@ -503,27 +672,47 @@ server <- function(input, output, session) {
     suppressWarnings(ICES_plot_7(advice_action_quality(), sagSettings(), query$sagStamp))
   })
 
-    
+
+  # advice_view_info <- reactive({
+  #   req(query$assessmentkey)
+  #   dt <- asd_cache()
+
+  #   if (is.null(dt) || !nrow(dt)) {
+  #     return(NULL)
+  #   }
+
+
+  #   out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
+  #   if (!nrow(out)) {
+  #     return(NULL)
+  #   }
+
+  #   pick_asd_record_for_year(
+  #     df = out,
+  #     active_year = input$selected_years,
+  #     assessment_component = query$assessmentcomponent
+  #   )
+  # })
   advice_view_info <- reactive({
     req(query$assessmentkey)
-    dt <- asd_cache()
-
+    req(rv$asd)
+    dt <- rv$asd
     if (is.null(dt) || !nrow(dt)) {
       return(NULL)
     }
-
 
     out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
     if (!nrow(out)) {
       return(NULL)
     }
-    
+
     pick_asd_record_for_year(
       df = out,
       active_year = input$selected_years,
       assessment_component = query$assessmentcomponent
     )
   })
+
 
 
 

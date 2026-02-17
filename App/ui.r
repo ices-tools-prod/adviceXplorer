@@ -47,7 +47,8 @@ library(memoise)
 library(future.apply)
 library(cachem)
 
-plan(multisession) # Enable parallel execution
+plan(multisession, workers = 2) # Enable parallel execution
+
 
 ########## Load utilities ############
 source("utilities_help.r")
@@ -110,6 +111,14 @@ tagList(
       function(){ Shiny.setInputValue('share_copy_success', Date.now(), {priority: 'event'}); },
       function(err){ Shiny.setInputValue('share_copy_error', err.toString(), {priority: 'event'}); }
     );
+  });
+")),
+tags$script(HTML("
+  Shiny.addCustomMessageHandler('startupProgress', function(msg) {
+    var el = document.getElementById('startup-progress-bar');
+    var txt = document.getElementById('startup-progress-text');
+    if (el) el.style.width = (msg.value || 0) + '%';
+    if (txt) txt.textContent = msg.text || '';
   });
 ")),
   navbarPage(
