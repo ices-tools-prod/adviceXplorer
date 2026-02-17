@@ -11,8 +11,35 @@ server <- function(input, output, session) {
   shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
 
+#####################################################################################################
+  shared <- reactiveValues(
+  SAG_bulk = NULL
+  )
 
+# Feature flag so you can disable quickly if needed
+  use_bulk_sag <- TRUE
+  # Bulk SAG preload ONLY for "current" active year (i.e., latest SID cache year)
+SAG_bulk_reactive <- reactive({
+  req(input$selected_years, input$selected_locations)
+  if (!isTRUE(use_bulk_sag)) return(NULL)
 
+  active_year <- as.integer(input$selected_years)
+  latest_year <- latest_sid_cache_year()
+
+  # Only use bulk endpoint for the current/latest year
+  if (is.na(latest_year) || active_year != latest_year) {
+    return(NULL)
+  }
+
+  # Download and merge selected ecoregions
+  getSAG_bulk_selected_ecoregions(input$selected_locations)
+}) %>%
+  bindCache(input$selected_years, input$selected_locations) %>%
+  bindEvent(input$selected_years, input$selected_locations)
+
+observe({
+  shared$SAG_bulk <- SAG_bulk_reactive()
+})
 
   ############################################################################################
   # values of the query string and first visit flag
@@ -283,27 +310,61 @@ server <- function(input, output, session) {
   ################################ End bookmarking code ###################################################
 
   ######### SAG data
-  SAG_data_reactive <- reactive({
-    info <- getStockInfoFromSAG(query$assessmentkey)
+  # SAG_data_reactive <- reactive({
+  #   info <- getStockInfoFromSAG(query$assessmentkey)
 
+  #   query$stockkeylabel <- info$StockKeyLabel
+  #   query$year <- info$AssessmentYear
+  #   query$sagStamp <- info$SAGStamp
+
+  #   stock_name <- query$stockkeylabel
+    
+
+  #   year <- query$year 
+    
+   
+  #   getSAGData(query$assessmentkey)
+    
+  # })
+  SAG_data_reactive <- reactive({
+    req(query$assessmentkey)
+
+    info <- getStockInfoFromSAG(query$assessmentkey)
     query$stockkeylabel <- info$StockKeyLabel
     query$year <- info$AssessmentYear
     query$sagStamp <- info$SAGStamp
 
-    stock_name <- query$stockkeylabel
-    
+    # 1) Try bulk (only exists for current year + selected ecoregions)
+    bulk_dt <- shared$SAG_bulk
+    from_bulk <- lookup_SAG_bulk_by_key(bulk_dt, query$assessmentkey)
 
-    year <- query$year 
-    
-   
+    if (!is.null(from_bulk)) {
+      return(from_bulk)
+    }
+
+    # 2) Fallback to existing per-stock call (current behaviour)
     getSAGData(query$assessmentkey)
-    
-  })
+  }) %>%
+    bindCache(query$assessmentkey, input$selected_years, input$selected_locations) %>%
+    bindEvent(query$assessmentkey, input$selected_years, input$selected_locations)
 
-  sagSettings <- reactive({
-    temp_setting <- icesSAG::getSAGSettingsForAStock(query$assessmentkey)
-    temp_setting[!(temp_setting$settingValue == ""), ]
+  observeEvent(query$assessmentkey, {
+    ak <- query$assessmentkey
+    bulk_hit <- !is.null(lookup_SAG_bulk_by_key(shared$SAG_bulk, ak))
+    message(sprintf("SAG bulk %s for AssessmentKey=%s", if (bulk_hit) "HIT" else "MISS", ak))
   })
+#################################################################################################
+
+  # sagSettings <- reactive({
+  #   temp_setting <- icesSAG::getSAGSettingsForAStock(query$assessmentkey)
+  #   temp_setting[!(temp_setting$settingValue == ""), ]
+  # })
+  sagSettings <- reactive({
+    req(query$assessmentkey)
+    getSAGSettings_cached(query$assessmentkey)
+  }) %>%
+    bindCache(query$assessmentkey) %>%
+    bindEvent(query$assessmentkey)
 
   drop_plots <- reactive({
     filter(sagSettings(), settingKey == 22 & settingValue == "yes" | settingValue == "y") %>%

@@ -128,30 +128,52 @@ getSID_meta <- function(active_year) read_SID_cache(active_year)
 #' }
 #'
 #' @export
-getStockList_for_active_year <- function(active_year, asd_pub) {
-    sid <- getSID_meta(active_year)
-    if (is.null(asd_pub) || !nrow(asd_pub)) {
-        return(sid[0])
-    }
+# getStockList_for_active_year <- function(active_year, asd_pub) {
+#     sid <- getSID_meta(active_year)
+#     if (is.null(asd_pub) || !nrow(asd_pub)) {
+#         return(sid[0])
+#     }
 
-    latest <- latest_sid_cache_year()
-    sag_map <- if (!is.na(latest) && as.integer(active_year) == latest) {
-        getSAG_latest_map()
-    } else {
-        build_SAG_map_for_active_year(active_year, sid, is_latest = FALSE)
-    }
+#     latest <- latest_sid_cache_year()
+#     sag_map <- if (!is.na(latest) && as.integer(active_year) == latest) {
+#         getSAG_latest_map()
+#     } else {
+#         build_SAG_map_for_active_year(active_year, sid, is_latest = FALSE)
+#     }
 
-    sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
-    if (!nrow(sag_pub)) {
-        return(sid[0])
-    }
+#     sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
+#     if (!nrow(sag_pub)) {
+#         return(sid[0])
+#     }
 
-    # KEY LINE: remove duplicates per Stock+Component
-    sag_pub <- keep_latest_assessment_by_component(sag_pub)
+#     # KEY LINE: remove duplicates per Stock+Component
+#     sag_pub <- keep_latest_assessment_by_component(sag_pub)
 
-    out <- sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
-    data.table::setorder(out, StockKeyLabel, AssessmentComponent, EcoRegion)
-    out[]
+#     out <- sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
+#     data.table::setorder(out, StockKeyLabel, AssessmentComponent, EcoRegion)
+#     out[]
+# }
+getStockList_for_active_year <- function(active_year, asd_pub, sag_bulk_dt = NULL) {
+  sid <- getSID_meta(active_year)
+  if (is.null(asd_pub) || !nrow(asd_pub)) return(sid[0])
+
+  latest <- latest_sid_cache_year()
+
+  sag_map <- if (!is.na(latest) && as.integer(active_year) == latest && !is.null(sag_bulk_dt)) {
+    getSAG_latest_map_from_bulk(sag_bulk_dt)     # bulk-based, ecoregion scoped
+  } else if (!is.na(latest) && as.integer(active_year) == latest) {
+    getSAG_latest_map()                           # global mapping endpoint
+  } else {
+    build_SAG_map_for_active_year(active_year, sid, is_latest = FALSE)
+  }
+
+  sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
+  if (!nrow(sag_pub)) return(sid[0])
+
+  sag_pub <- keep_latest_assessment_by_component(sag_pub)
+  out <- sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
+  data.table::setorder(out, StockKeyLabel, AssessmentComponent, EcoRegion)
+  out[]
 }
 
 

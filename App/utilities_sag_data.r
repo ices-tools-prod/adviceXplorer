@@ -1275,3 +1275,196 @@ filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
 
     sag_keep[]
 }
+
+
+
+
+#' Get acronym for an ICES ecoregion
+#'
+#' Translates a full ICES ecoregion name into the corresponding
+#' three-letter acronym used in the app (e.g. `"Baltic Sea"` → `"BtS"`).
+#'
+#' @param ecoregion A single character string giving the full
+#'   ecoregion name. Must be one of:
+#'   `"Baltic Sea"`, `"Bay of Biscay and the Iberian Coast"`,
+#'   `"Celtic Seas"`, `"Greater North Sea"`, `"Norwegian Sea"`,
+#'   `"Icelandic Waters"`, `"Barents Sea"`, `"Greenland Sea"`,
+#'   `"Faroes"`, `"Oceanic Northeast Atlantic"`, or `"Azores"`.
+#'
+#' @return A character string with the corresponding acronym:
+#'   `"BtS"`, `"BI"`, `"CS"`, `"NrS"`, `"NwS"`, `"IS"`, `"BrS"`,
+#'   `"GS"`, `"FO"`, `"ONA"`, or `"AZ"`.
+#'
+#' @details
+#' If `ecoregion` does not match any of the supported names,
+#' the function raises an error via [base::stop()].
+#'
+#' @examples
+#' get_ecoregion_acronym("Baltic Sea")
+#' get_ecoregion_acronym("Greater North Sea")
+#'
+#' @export
+get_ecoregion_acronym <- function(ecoregion) {
+  switch(ecoregion,
+         "Baltic Sea" = "BtS",
+         "Bay of Biscay and the Iberian Coast" = "BI",
+         "Bay of Biscay" = "BoB",
+         "Iberian Waters" = "IW",
+         "Celtic Seas" = "CS",
+         "Celtic Sea" = "CSx",
+         "Irish Sea" = "IrS",
+         "Greater North Sea" = "NrS",
+         "Norwegian Sea" = "NwS",
+         "Icelandic Waters" = "IS",
+         "Barents Sea" = "BrS",
+         "Greenland Sea" = "GS",
+         "Faroes" = "FO",
+         "Oceanic Northeast Atlantic" = "ONA",
+         "Azores" = "AZ",
+         stop("Unknown ecoregion")
+  )
+}
+
+
+
+
+
+
+
+
+# -----------------------------------------------------------------------------
+# Bulk SAG download for current year by ecoregion (like fisheriesXplorer)
+# -----------------------------------------------------------------------------
+
+sag_bulk_cache <- cachem::cache_mem(max_age = 6 * 3600)  # 6h; adjust
+sag_settings_cache <- cachem::cache_mem(max_age = 12 * 3600)
+
+# Reuse your existing mapping
+getSAG_ecoregion_new <- function(Ecoregion) {
+  EcoregionCode <- get_ecoregion_acronym(Ecoregion)
+
+  sag <- jsonlite::fromJSON(
+    utils::URLencode(
+      sprintf("https://sag.ices.dk/SAG_API/LatestStocks/Download?ecoregion=%s", EcoregionCode)
+    )
+  )
+  sag
+}
+
+# Memoised bulk fetch per ecoregion (process-local)
+getSAG_bulk_ecoregion <- memoise::memoise(function(ecoregion) {
+  dt <- getSAG_ecoregion_new(ecoregion)
+
+  # Robust empty handling
+  if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+    return(data.table::data.table())
+  }
+
+  data.table::setDT(dt)
+
+  # Make sure AssessmentKey exists and is integer (needed for lookup)
+  # The latest download endpoint often returns assessmentKey but keep robust:
+  if ("assessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(assessmentKey))]
+  if (!"AssessmentKey" %in% names(dt) && "AssessmentKey" %in% names(dt)) {
+    dt[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+  }
+
+  # Optional: if you rely on StockKeyLabel somewhere downstream
+  if ("stockCode" %in% names(dt)) dt[, StockKeyLabel := stockCode]
+
+  # Key for fast lookup
+  if ("AssessmentKey" %in% names(dt)) data.table::setkey(dt, AssessmentKey)
+
+  dt[]
+}, cache = sag_bulk_cache)
+
+# Combine multiple selected ecoregions into one table (keyed by AssessmentKey)
+getSAG_bulk_selected_ecoregions <- function(selected_ecoregions) {
+  selected_ecoregions <- unique(selected_ecoregions)
+  if (!length(selected_ecoregions)) return(data.table::data.table())
+
+  out <- data.table::rbindlist(lapply(selected_ecoregions, getSAG_bulk_ecoregion), fill = TRUE)
+
+  if (!nrow(out)) return(out)
+  data.table::setDT(out)
+  if ("AssessmentKey" %in% names(out)) {
+    out[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+    out <- out[!is.na(AssessmentKey)]
+    data.table::setkey(out, AssessmentKey)
+  }
+  out[]
+}
+
+# Lookup helper: returns a data.frame/data.table for one AssessmentKey or NULL
+lookup_SAG_bulk_by_key <- function(bulk_dt, assessment_key) {
+  if (is.null(bulk_dt) || !inherits(bulk_dt, "data.frame") || nrow(bulk_dt) == 0) return(NULL)
+
+  ak <- suppressWarnings(as.integer(assessment_key))
+  if (is.na(ak)) return(NULL)
+
+  data.table::setDT(bulk_dt)
+
+  # If keyed, this is fast; if not keyed, still works
+  if (identical(data.table::key(bulk_dt), "AssessmentKey")) {
+    out <- bulk_dt[J(ak)]
+  } else if ("AssessmentKey" %in% names(bulk_dt)) {
+    out <- bulk_dt[AssessmentKey == ak]
+  } else {
+    return(NULL)
+  }
+
+  if (!nrow(out)) return(NULL)
+  out[]
+}
+
+# Settings: memoise per stock (no bulk endpoint assumed)
+getSAGSettings_cached <- memoise::memoise(function(assessment_key) {
+  x <- icesSAG::getSAGSettingsForAStock(assessment_key)
+  if (is.null(x) || length(x) == 0 || NROW(x) == 0 || !is.data.frame(x)) {
+    return(data.frame())
+  }
+  x <- x[x$settingValue != "", , drop = FALSE]
+  x
+}, cache = sag_settings_cache)
+
+
+# Build the same "latest map" structure from a bulk LatestStocks/Download payload
+# (ecoregion-scoped; not global).
+getSAG_latest_map_from_bulk <- function(bulk_dt) {
+  if (is.null(bulk_dt) || length(bulk_dt) == 0 || NROW(bulk_dt) == 0 || !is.data.frame(bulk_dt)) {
+    return(data.table::data.table())
+  }
+
+  dt <- data.table::as.data.table(bulk_dt)
+
+  # Normalise names (bulk payloads vary)
+  if ("stockCode" %in% names(dt)) dt[, StockKeyLabel := stockCode]
+  if ("StockKeyLabel" %in% names(dt)) dt[, StockKeyLabel := as.character(StockKeyLabel)]
+
+  if ("assessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(assessmentKey))]
+  if ("AssessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+
+  if ("assessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(assessmentYear))]
+  if ("AssessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+
+  # Component: may or may not exist in bulk
+  if ("adviceComponent" %in% names(dt)) dt[, AssessmentComponent := adviceComponent]
+  if ("AssessmentComponent" %in% names(dt)) dt[, AssessmentComponent := AssessmentComponent]
+
+  if (!"AssessmentComponent" %in% names(dt)) {
+    dt[, AssessmentComponent := "NA"]
+  }
+
+  out <- dt[, .(StockKeyLabel, AssessmentKey, AssessmentYear, AssessmentComponent)]
+  out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
+               !is.na(AssessmentKey) & !is.na(AssessmentYear)]
+
+  out[, AssessmentComponent := as.character(AssessmentComponent)]
+  out[, AssessmentComponent := data.table::fifelse(
+    is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+    "NA",
+    AssessmentComponent
+  )]
+
+  unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}
