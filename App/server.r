@@ -70,7 +70,7 @@ server <- function(input, output, session) {
   }
 
 
-  # Year pipeline: SID (disk) -> ASD (network) -> stock list (SAG join inside)
+  # Year pipeline: SID (disk) -> ASD (API) -> stock list (SAG join inside)
   observeEvent(input$selected_years,
     {
       req(input$selected_years)
@@ -86,7 +86,7 @@ server <- function(input, output, session) {
         getSID_meta(yr)
       })
 
-      # 2) ASD (network) depends on SID
+      # 2) ASD (API) depends on SID
       p_asd <- p_sid %...>% (function(sid) {
         update_startup_progress(session, 20, "SID loaded. Fetching ASD…")
         future_promise({
@@ -187,73 +187,14 @@ server <- function(input, output, session) {
 
   ############################ Map panel server ##############################################
   map_panel_server(input, output, session)
-
-  # asd_cache <- reactive({
-  #   req(input$selected_years)
-  #   sid <- getSID_meta(input$selected_years)
-  #   build_ASD_cache_for_active_year(input$selected_years, sid)
-  # }) %>%
-  #   bindCache(input$selected_years) %>%
-  #   bindEvent(input$selected_years)
-
-  # asd_pub <- reactive({
-  #   dt <- asd_cache()
-  #   if (is.null(dt) || !nrow(dt)) {
-  #     return(data.table::data.table())
-  #   }
-
-  #   data.table::setDT(dt)
-
-  #   # keep keys for matching; include StockKeyLabel+AssessmentYear for fallback
-  #   out <- dt[, .(
-  #     AssessmentKey,
-  #     StockKeyLabel,
-  #     AssessmentYear
-  #   )]
-
-  #   # ensure types are consistent
-  #   out[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
-  #   out[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
-  #   out[, StockKeyLabel := as.character(StockKeyLabel)]
-
-  #   unique(out, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
-  # }) %>%
-  #   bindCache(input$selected_years) %>%
-  #   bindEvent(input$selected_years)
-
-
-  ############################ Stock selection table server ######################################
-  # eco_filter <- reactive({
-  #   req(input$selected_locations, input$selected_years)
-
-  #   asd_pub_dt <- asd_pub() # use the reactive
-  #   stock_list_long <- getStockList_for_active_year(
-  #     active_year = input$selected_years,
-  #     asd_pub = asd_pub_dt
-  #   )
-
-  #   stock_list_long <- purrr::map_dfr(
-  #     .x = input$selected_locations,
-  #     .f = function(.x) stock_list_long %>% dplyr::filter(stringr::str_detect(EcoRegion, .x))
-  #   )
-
-  #   if (nrow(stock_list_long) != 0) {
-  #     stock_list_long %>% dplyr::arrange(StockKeyLabel)
-  #   }
-  # }) %>%
-  #   bindCache(input$selected_locations, input$selected_years) %>%
-  #   bindEvent(input$selected_locations, input$selected_years)
-
-
-
-
+  ############################ End map panel server ##############################################
+  
+  ###########################  Render stock selection table and handle selection ##################################################
   res_mod <- select_group_server(
     id = "my-filters",
     data = eco_filter,
     vars = reactive(c("StockKeyLabel", "SpeciesCommonName"))
   )
-
-  ###########################################################  Render stock selection table
 
   res_modo <- reactive({
     if (!isTRUE(rv$ready)) {
@@ -381,7 +322,7 @@ server <- function(input, output, session) {
   })
 
 
-  ################################## Bookmarking code #############################################
+  ################################## Bookmarking #############################################
 
   # Track whether we're in a restore phase (prevents writer loops)
   nav <- reactiveValues(restoring = TRUE)
@@ -452,20 +393,15 @@ server <- function(input, output, session) {
 
   ################################ End bookmarking code ###################################################
 
-  ######### SAG data
+  ################################ SAG data and plots ############################################################
   SAG_data_reactive <- reactive({
     info <- getStockInfoFromSAG(query$assessmentkey)
 
     query$stockkeylabel <- info$StockKeyLabel
     query$year <- info$AssessmentYear
     query$sagStamp <- info$SAGStamp
-
     stock_name <- query$stockkeylabel
-
-
     year <- query$year
-
-
     getSAGData(query$assessmentkey)
   })
 
@@ -480,26 +416,18 @@ server <- function(input, output, session) {
       as.numeric()
   })
 
-  # ##### get link to library pdf advice
-  # advice_doi <- eventReactive((req(SAG_data_reactive())),{
-  #   SAG_data_reactive()$LinkToAdvice[1]
-  # })
-
   replaced_advice_doi <- eventReactive(req(query$assessmentkey), {
     get_link_replaced_advice(SAG_data_reactive())
   })
 
 
-  ###### info about the stock selected for top of page
+  ############################ Stock info and advice headline reactives (used in multiple tabs) #############################
   stock_info <- reactive({
     filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey, ]
     # Conditional check if filtered_row is empty
     if (nrow(filtered_row) == 0) {
       filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
     }
-
-    # filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey,]
-
 
     get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1])
   })
@@ -535,7 +463,7 @@ server <- function(input, output, session) {
     contentType = "application/zip"
   )
 
-  ######################### Stock development over time plots
+  ############################################## Stock development over time plots ######################
 
   output$plot1 <- renderPlotly({
     if (is.null(sagSettings() %>% filter(SAGChartKey == 1) %>% filter(settingKey == 22) %>% pull(settingValue) %>% nullifempty())) {
@@ -673,26 +601,7 @@ server <- function(input, output, session) {
   })
 
 
-  # advice_view_info <- reactive({
-  #   req(query$assessmentkey)
-  #   dt <- asd_cache()
-
-  #   if (is.null(dt) || !nrow(dt)) {
-  #     return(NULL)
-  #   }
-
-
-  #   out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
-  #   if (!nrow(out)) {
-  #     return(NULL)
-  #   }
-
-  #   pick_asd_record_for_year(
-  #     df = out,
-  #     active_year = input$selected_years,
-  #     assessment_component = query$assessmentcomponent
-  #   )
-  # })
+  
   advice_view_info <- reactive({
     req(query$assessmentkey)
     req(rv$asd)
@@ -712,9 +621,6 @@ server <- function(input, output, session) {
       assessment_component = query$assessmentcomponent
     )
   })
-
-
-
 
 
   ##### ASD info previous year
@@ -1007,8 +913,6 @@ server <- function(input, output, session) {
 
 
   mod_resources_server("resources")
-
-
   share_url <- reactiveVal("")
 
   observeEvent(input$share_btn, {

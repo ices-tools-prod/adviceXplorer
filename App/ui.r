@@ -51,19 +51,18 @@ plan(multisession, workers = 2) # Enable parallel execution
 
 
 ########## Load utilities ############
-source("utilities_help.r")
-source("utilities_SID_data.r")
-source("update_SID_data.r")
-source("utilities_load_shapefiles.r")
-source("utilities_plotting.r")
-source("utilities_mapping.r")
-source("utilities_sag_data.r")
-source("update_SAG_data.r")
-source("utilities_catch_scenarios.r")
-source("utilities_shiny_formatting.r")
-source("utilities_calendar.r")
-source("utilities_resources.r")
-source("utilities_ASD.r")
+
+source("utilities_SID_data.R")
+source("update_SID_data.R")
+source("utilities_load_shapefiles.R")
+source("utilities_plotting.R")
+source("utilities_mapping.R")
+source("utilities_sag_data.R")
+source("update_SAG_data.R")
+source("utilities_catch_scenarios.R")
+source("utilities_shiny_formatting.R")
+source("utilities_resources.R")
+source("utilities_ASD.R")
 
 
 title_html <- tags$a(
