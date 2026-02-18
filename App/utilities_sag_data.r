@@ -843,152 +843,76 @@ is_na_column <- function(dataframe, col_name) {
   return(all(is.na(dataframe[[col_name]])))
 }
 
-# # Example function to integrate getSAGData and use future_lapply
-# getSAGQualityAssessment <- function(stock_code, year, assessmentComponent) {
-#   # Define the years to fetch data for
-#   years <- c(2024, 2023, 2022, 2021, 2020)
-#   years <- years[years <= year]
-  
-#   # Asynchronously fetch SAG data for all years using future_lapply
-#   sag_data_list <- future_lapply(years, function(y) {
-#     # Find the assessment key for the given stock code and year
-#     assessmentKey <- findAssessmentKey(stock_code, year = y)
-    
-#     # Retrieve the SAG data for the assessment key
-#     getSAGData(assessmentKey)
-#   })
-  
-#   # Combine the results for all years into one data frame
-#   all_sag_data <- bind_rows(sag_data_list)
-#   browser()
-#   # Filter data based on the assessment component and other conditions
-#   filtered_data <- all_sag_data %>%
-#     filter(Purpose == "Advice" & AssessmentComponent == assessmentComponent) %>%
-#     distinct()
 
-#   # Make AssessmentYear a factor
-#   filtered_data$AssessmentYear <- as.factor(filtered_data$AssessmentYear)
-  
-#   return(filtered_data)
-# }
-
-
-# quality_assessment_data_local <- function(stock_code, year, assessmentComponent) {
-#   years <- c(2024, 2023, 2022, 2021, 2020)
-#   years <- years[years <= year]
-#   datalist <- list()
-
-#   data_temp <- try(access_sag_data_local(stock_code, years))
-#   if (isTRUE(class(data_temp) == "try-error")) {
-#     next
-#   } else {
-#     data_temp <- filter(data_temp, between(Year, 2005, 2024))
-    
-#     data_temp <- data_temp %>% select(
-#       Year,
-#       Recruitment, RecruitmentAge,UnitOfRecruitment,
-#       StockSize, Bpa, Blim, MSYBtrigger, StockSizeDescription, StockSizeUnits,
-#       FishingPressure, Flim, Fpa, FMSY, FAge, FishingPressureDescription,
-#       AssessmentYear, Purpose, SAGStamp, AssessmentComponent
-#     )
-#     data_temp$AssessmentComponent[data_temp$AssessmentComponent == "" | is.na(data_temp$AssessmentComponent) | data_temp$AssessmentComponent == 0 | data_temp$AssessmentComponent == "N.A."] <- "NA" # this probably needs to go when they update ASD from "N.A." to NA
-#     data_temp$RecruitmentAge <- as.character(data_temp$RecruitmentAge)
-#     data_temp$StockSizeDescription <- as.character(data_temp$StockSizeDescription)
-#     data_temp$StockSizeUnits <- as.character(data_temp$StockSizeUnits)
-#     data_temp$FAge <- as.character(data_temp$FAge)
-#     data_temp$FishingPressureDescription <- as.character(data_temp$FishingPressureDescription)
-#   }
-#   # take out non published data from before 2021 in big data
-#   SAG_data <- filter(data_temp, Purpose == "Advice" & AssessmentComponent == assessmentComponent) %>% distinct()
-#   # make assessmentYear as factor
-#   SAG_data$AssessmentYear <- as.factor(SAG_data$AssessmentYear)
-
-#   return(SAG_data)
-# }
-
-# library(future)
-# library(promises)
-# library(dplyr)
-
-# # Enable parallel execution with multisession
-# plan(multisession)
-
-# Optimized function using future_lapply to handle years concurrently
 getSAGQualityAssessment <- function(stock_code, year, assessmentComponent, yearsToDisplay = NULL) {
-  
-  # Define years for which you want to fetch data
-  # years <- c(2024, 2023, 2022, 2021, 2020)
-  #create a sequence of years from the variable year to 5 years prior, 
-  #if yearsToDisplay is provided then from year to yearsToDisplay years prior
+
+  # years sequence
+  year <- as.integer(year)
   if (!is.null(yearsToDisplay)) {
-    years <- seq(year, year - (yearsToDisplay - 1))
+    years <- seq(year, year - (as.integer(yearsToDisplay) - 1))
   } else {
     years <- seq(year, year - 4)
   }
-  # years <- years[years <= year]
-  
-  # Use future_lapply to fetch and process data for multiple years concurrently
-  data_temp <- future_lapply(years, function(y) {
-    # Fetch the SAG data for each year
-    # data_temp <- try(access_sag_data_local(stock_code, y))
-    assessmentKey <- findAssessmentKey(stock_code, year = y)
-    
-    # Retrieve the SAG data for the assessment key
-    # getSAGData(assessmentKey)
-    data_temp <- try(getSAGData(assessmentKey))
-    # Check for errors in fetching the data
-    if (inherits(data_temp, "try-error")) {
-      return(NULL)  # Return NULL if there's an error
-    } else {
-      # Ensure Year is numeric for filtering
-      data_temp$Year <- as.numeric(data_temp$Year)
-      data_temp$Recruitment <- as.numeric(data_temp$Recruitment)
-      data_temp$StockSize <- as.numeric(data_temp$StockSize)
-      data_temp$Bpa <- as.numeric(data_temp$Bpa)
-      data_temp$Blim <- as.numeric(data_temp$Blim)
-      data_temp$MSYBtrigger <- as.numeric(data_temp$MSYBtrigger)
-      data_temp$FishingPressure <- as.numeric(data_temp$FishingPressure)
-      data_temp$Flim <- as.numeric(data_temp$Flim)
-      data_temp$Fpa <- as.numeric(data_temp$Fpa)
-      data_temp$FMSY <- as.numeric(data_temp$FMSY)
-      # data_temp$AssessmentYear <- as.factor(data_temp$AssessmentYear)
-      # Filter the data for the required year range
-      data_temp <- filter(data_temp, between(Year, 2005, year))
-      
-      # Select necessary columns
-      data_temp <- data_temp %>% select(
-        Year,
-        Recruitment, RecruitmentAge, UnitOfRecruitment,
-        StockSize, Bpa, Blim, MSYBtrigger, StockSizeDescription, StockSizeUnits,
-        FishingPressure, Flim, Fpa, FMSY, FAge, FishingPressureDescription,
-        AssessmentYear, Purpose,  AssessmentComponent
-      )
-      
-      # Standardize the AssessmentComponent column
-      data_temp$AssessmentComponent[data_temp$AssessmentComponent == "" | is.na(data_temp$AssessmentComponent) | data_temp$AssessmentComponent == 0 | data_temp$AssessmentComponent == "N.A."] <- "NA"
-      
-      # Convert character columns
-      data_temp$RecruitmentAge <- as.character(data_temp$RecruitmentAge)
-      data_temp$UnitOfRecruitment <- as.character(data_temp$UnitOfRecruitment)
-      data_temp$StockSizeDescription <- as.character(data_temp$StockSizeDescription)
-      data_temp$StockSizeUnits <- as.character(data_temp$StockSizeUnits)
-      data_temp$FAge <- as.character(data_temp$FAge)
-      data_temp$FishingPressureDescription <- as.character(data_temp$FishingPressureDescription)
-      
-      # Filter based on Purpose and AssessmentComponent
-      SAG_data <- filter(data_temp, Purpose == "Advice" & AssessmentComponent == assessmentComponent) %>% distinct()
-      
-      # Make AssessmentYear a factor
-      SAG_data$AssessmentYear <- as.factor(SAG_data$AssessmentYear)
-      
-      return(SAG_data)
+
+  # sequential: lapply (or for-loop)
+  out_list <- lapply(years, function(y) {
+    # 1) find assessmentKey for that year
+    assessmentKey <- try(findAssessmentKey(stock_code, year = y), silent = TRUE)
+    if (inherits(assessmentKey, "try-error") || is.null(assessmentKey) || length(assessmentKey) == 0) {
+      return(NULL)
     }
+
+    # 2) fetch SAG for that assessmentKey (your getSAGData does 2 SAG calls)
+    dat <- try(getSAGData(assessmentKey), silent = TRUE)
+    if (inherits(dat, "try-error") || is.null(dat) || !nrow(dat)) {
+      return(NULL)
+    }
+
+    # 3) coerce + filter (same as your current function)
+    dat$Year <- as.numeric(dat$Year)
+    dat$Recruitment <- as.numeric(dat$Recruitment)
+    dat$StockSize <- as.numeric(dat$StockSize)
+    dat$Bpa <- as.numeric(dat$Bpa)
+    dat$Blim <- as.numeric(dat$Blim)
+    dat$MSYBtrigger <- as.numeric(dat$MSYBtrigger)
+    dat$FishingPressure <- as.numeric(dat$FishingPressure)
+    dat$Flim <- as.numeric(dat$Flim)
+    dat$Fpa <- as.numeric(dat$Fpa)
+    dat$FMSY <- as.numeric(dat$FMSY)
+
+    dat <- dplyr::filter(dat, dplyr::between(.data$Year, 2005, year))
+
+    dat <- dplyr::select(
+      dat,
+      Year,
+      Recruitment, RecruitmentAge, UnitOfRecruitment,
+      StockSize, Bpa, Blim, MSYBtrigger, StockSizeDescription, StockSizeUnits,
+      FishingPressure, Flim, Fpa, FMSY, FAge, FishingPressureDescription,
+      AssessmentYear, Purpose, AssessmentComponent
+    )
+
+    # standardise component
+    dat$AssessmentComponent[dat$AssessmentComponent == "" |
+                           is.na(dat$AssessmentComponent) |
+                           dat$AssessmentComponent == 0 |
+                           dat$AssessmentComponent == "N.A."] <- "NA"
+
+    dat$RecruitmentAge <- as.character(dat$RecruitmentAge)
+    dat$UnitOfRecruitment <- as.character(dat$UnitOfRecruitment)
+    dat$StockSizeDescription <- as.character(dat$StockSizeDescription)
+    dat$StockSizeUnits <- as.character(dat$StockSizeUnits)
+    dat$FAge <- as.character(dat$FAge)
+    dat$FishingPressureDescription <- as.character(dat$FishingPressureDescription)
+
+    # keep only advice + component
+    dat <- dplyr::filter(dat, Purpose == "Advice", AssessmentComponent == assessmentComponent) %>%
+      dplyr::distinct()
+
+    dat$AssessmentYear <- as.factor(dat$AssessmentYear)
+    dat
   })
-  
-  # Combine all the results from different years into a single data frame
-  all_sag_data <- bind_rows(data_temp)
-  
-  return(all_sag_data)
+
+  dplyr::bind_rows(out_list)
 }
 
 
