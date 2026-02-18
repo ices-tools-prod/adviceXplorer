@@ -5,6 +5,6 @@ account: ices-tools-dev
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 16627079
-bundleId: 11597359
+bundleId: 11597433
 url: https://ices-tools-dev.shinyapps.io/advicexplorer/
 version: 1
