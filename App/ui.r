@@ -51,7 +51,7 @@ plan(multisession, workers = 2) # Enable parallel execution
 
 
 ########## Load utilities ############
-
+source("utilities_dataPipeline.R")
 source("utilities_SID_data.R")
 source("update_SID_data.R")
 source("utilities_load_shapefiles.R")
