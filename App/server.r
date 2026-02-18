@@ -29,24 +29,6 @@ server <- function(input, output, session) {
     last_year = NULL
   )
 
-  # # Optional: progress modal helpers (uses your earlier modal/progress functions)
-  # # If you haven't added them, you can comment these calls out.
-  # .start_loading <- function(rv, session, year) {
-  #   rv$ready <- FALSE
-  #   show_startup_modal(session, paste("Loading advice valid in", year))
-  #   update_startup_progress(session, 5, "Fetching SID…")
-  # }
-
-  # .fail_loading <- function(e) {
-  #   update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
-  # }
-
-  # .done_loading <- function() {
-  #   rv$ready <- TRUE
-  #   update_startup_progress(session, 100, "Done.")
-  #   close_startup_modal()
-  # }
-
 
   # Year pipeline: SID (disk) -> ASD (API) -> stock list (SAG join inside)
   observeEvent(input$selected_years,
@@ -406,8 +388,8 @@ server <- function(input, output, session) {
     if (nrow(filtered_row) == 0) {
       filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
     }
-
-    get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1])
+    
+    get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1], filtered_row$EcoRegion)
   })
 
   output$stock_infos1 <- output$stock_infos2 <- output$stock_infos3 <- renderUI(

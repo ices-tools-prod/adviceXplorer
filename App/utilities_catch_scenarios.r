@@ -133,29 +133,38 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 #' 
 #'
 #' @export
-get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description) { # StockDescription,
-  
-  stock_info_sentence <- HTML(
+get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description, EcoRegion) {
+
+  fx_base <- "https://ices-taf.shinyapps.io/fisheriesXplorer/"
+  eco_q   <- URLencode(EcoRegion %||% "", reserved = TRUE)
+  fx_url  <- paste0(fx_base, "#eco=", eco_q, "&tab=stock_status&subtab=status_lookup")
+  fx_link <- paste0("<a href='", fx_url, "' target='_blank' rel='noopener'>fisheriesXplorer</a>")
+
+   stock_info_sentence <- HTML(
     paste0(
       "<b><i><font size=", 4, ">", "Stock information:", "</font></b></i><br/>",
       "<font size=", 3, ">", "Common name: ", "<b>", CommonName, "</b><br/>",
       "<font size=", 3, ">", "Stock code: ", "<b>", stockcode, "</b><br/>",
       "<font size=", 3, ">", "Assessment year: ", "<b>", assessmentYear, "</b><br/>",
-      if (all(AssessmentComponent != "NA") ) {
-        paste0(     
-          "<font size=", 3, ">", "Component: ", "<b>", AssessmentComponent, "</b><br/>",     
-          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b>"
-         )
+      if (all(AssessmentComponent != "NA")) {
+        paste0(
+          "<font size=", 3, ">", "Component: ", "<b>", AssessmentComponent, "</b><br/>",
+          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b><br/>",
+          "<font size=", 3, ">", "Status: ", "<b>", fx_link, "</b><br/>"
+        )
       } else {
-        paste0(          
-          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b>"
+        paste0(
+          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b><br/>",
+          "<font size=", 3, ">", "Status: ", "<b>", fx_link, "</b><br/>"
         )
       }
     )
   )
 
-  return(stock_info_sentence)
+  stock_info_sentence
 }
+
+
 
 #' Returns an HTML string containing the catch scenario table's footnotes.
 #'
