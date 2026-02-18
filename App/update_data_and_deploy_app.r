@@ -1,14 +1,9 @@
 #### This code will update both SAG and SID data at regular time intervals and re-deploy the app at the end
 
 # Libraries required for the code are loaded
-library(tidyverse)
-library(reshape2)
-library(icesTAF)
-library(dplyr)
-library(icesSAG)
-library(data.table)
+
 library(rsconnect)
-library(tm)
+
 
 
 setwd("./App")
@@ -19,10 +14,10 @@ setwd("./App")
 # - utilities_sag_data.r: Contains utility functions for SAG data processing.
 # - update_SAG_data.r: Script to update SAG data.
 # - update_SID_data.r: Script to update SID data.
-source("utilities_SID_data.r")
-source("utilities_sag_data.r")
-source("update_SAG_data.r")
-source("update_SID_data.r")
+# source("utilities_SID_data.r")
+# source("utilities_sag_data.r")
+# source("update_SAG_data.r")
+# source("update_SID_data.r")
 
 # Function:
 # - UpdateDataApp(mode = "LatestYear"): Updates the application data to the latest year.

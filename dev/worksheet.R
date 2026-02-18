@@ -3353,3 +3353,6 @@ sagList <- jsonlite::fromJSON(
       sprintf("https://sag.ices.dk/SAG_API/api/StockList?year=0&assessmentKey=%s", 18808)
     )
   )
+
+
+icesSAG::getSAGSettingsForAStock(20911)

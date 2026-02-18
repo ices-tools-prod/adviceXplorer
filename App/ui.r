@@ -45,22 +45,24 @@ library(promises)
 library(data.table)
 library(memoise)
 library(future.apply)
+library(cachem)
 
-plan(multisession) # Enable parallel execution
+plan(multisession, workers = 2) # Enable parallel execution
+
 
 ########## Load utilities ############
-source("utilities_help.r")
-source("utilities_SID_data.r")
-source("update_SID_data.r")
-source("utilities_load_shapefiles.r")
-source("utilities_plotting.r")
-source("utilities_mapping.r")
-source("utilities_sag_data.r")
-source("update_SAG_data.r")
-source("utilities_catch_scenarios.r")
-source("utilities_shiny_formatting.r")
-source("utilities_calendar.r")
-source("utilities_resources.r")
+
+source("utilities_SID_data.R")
+source("update_SID_data.R")
+source("utilities_load_shapefiles.R")
+source("utilities_plotting.R")
+source("utilities_mapping.R")
+source("utilities_sag_data.R")
+source("update_SAG_data.R")
+source("utilities_catch_scenarios.R")
+source("utilities_shiny_formatting.R")
+source("utilities_resources.R")
+source("utilities_ASD.R")
 
 
 title_html <- tags$a(
@@ -108,6 +110,14 @@ tagList(
       function(){ Shiny.setInputValue('share_copy_success', Date.now(), {priority: 'event'}); },
       function(err){ Shiny.setInputValue('share_copy_error', err.toString(), {priority: 'event'}); }
     );
+  });
+")),
+tags$script(HTML("
+  Shiny.addCustomMessageHandler('startupProgress', function(msg) {
+    var el = document.getElementById('startup-progress-bar');
+    var txt = document.getElementById('startup-progress-text');
+    if (el) el.style.width = (msg.value || 0) + '%';
+    if (txt) txt.textContent = msg.text || '';
   });
 ")),
   navbarPage(

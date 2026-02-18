@@ -61,9 +61,7 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
   catch_scenario_advice_sentence <- HTML(
     paste0(
       "<span class='hovertext' data-hover='Click here to access the pdf version of the Advice'>",
-      # "<a href='", advice_doi, "' target='_blank'>",
-      # "<a href='", catch_scenario_list$adviceDOI, "' target='_blank'>",
-      "<a href='", catch_scenario_list$adviceLink, "' target='_blank'>",
+      "<a href='", catch_scenario_list$adviceDOI, "' target='_blank'>",
       "<b><i><font size=4> Headline advice </b></i><i class='fa-solid fa-up-right-from-square'></i></font></a></span>",
       "<br/>",
       "<font size=3>", catch_scenario_list$adviceSentence, "</font>",

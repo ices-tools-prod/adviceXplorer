@@ -1,116 +1,253 @@
-msg <- function(...) {
-  emph <- "\n****************\n"
-  cat(emph, ..., emph)
-}
-
-
 # required if using most recent version of sf
 sf::sf_use_s2(FALSE)
-
-
-
-
 
 
 
 ############# Start server function ################
 
 server <- function(input, output, session) {
-  msg("server loop start:\n  ", getwd())
   shinyjs::disable(selector = '.navbar-nav a[data-value="Development over time"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
   shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
 
-  
 
-  
-  ############################################################################################
+
+  show_startup_modal <- function(session, title = "Loading data") {
+    showModal(modalDialog(
+      title = title,
+      easyClose = FALSE,
+      footer = NULL,
+      size = "m",
+      tagList(
+        tags$div(
+          style = "margin-top: 6px;",
+          tags$div(id = "startup-progress-text", style = "margin-bottom: 8px;", "Starting…"),
+          tags$div(
+            style = "height: 12px; background: #eee; border-radius: 6px; overflow: hidden;",
+            tags$div(
+              id = "startup-progress-bar",
+              style = "height: 100%; width: 0%; background: #f15d22;"
+            )
+          )
+        )
+      )
+    ))
+  }
+
+  update_startup_progress <- function(session, value, text) {
+    session$sendCustomMessage("startupProgress", list(value = value, text = text))
+  }
   # values of the query string and first visit flag
   query <- reactiveValues(query_from_table = FALSE)
 
-  ############################ Map panel server ##############################################
-  map_panel_server(input, output, session)
+  close_startup_modal <- function() removeModal()
+  # Centralised runtime store
+  rv <- reactiveValues(
+    sid = NULL,
+    asd = NULL,
+    asd_pub = data.table::data.table(),
+    stock_list = data.table::data.table(),
+    ready = FALSE,
+    last_year = NULL
+  )
 
-  
-  ############################ Stock selection table server ######################################
+  # Optional: progress modal helpers (uses your earlier modal/progress functions)
+  # If you haven't added them, you can comment these calls out.
+  .start_loading <- function(year) {
+    rv$ready <- FALSE
+    show_startup_modal(session, paste("Loading", year))
+    update_startup_progress(session, 5, "Reading SID snapshot…")
+  }
+
+  .fail_loading <- function(e) {
+    update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
+  }
+
+  .done_loading <- function() {
+    rv$ready <- TRUE
+    update_startup_progress(session, 100, "Done.")
+    close_startup_modal()
+  }
+
+
+  # Year pipeline: SID (disk) -> ASD (API) -> stock list (SAG join inside)
+  observeEvent(input$selected_years,
+    {
+      req(input$selected_years)
+      yr <- as.integer(input$selected_years)
+      rv$last_year <- yr
+      rv$ready <- FALSE
+
+      show_startup_modal(session, paste("Loading", yr))
+      update_startup_progress(session, 5, "Fetching SID…")
+
+      # 1) SID (disk)
+      p_sid <- future_promise({
+        getSID_meta(yr)
+      })
+
+      # 2) ASD (API) depends on SID
+      p_asd <- p_sid %...>% (function(sid) {
+        update_startup_progress(session, 20, "SID loaded. Fetching ASD…")
+        future_promise({
+          build_ASD_cache_for_active_year(yr, sid)
+        }) %...>% (function(asd) {
+          # store SID/ASD in main process (NOT in workers)
+          rv$sid <- sid
+          rv$asd <- asd
+          asd
+        })
+      })
+
+      # 3) Build asd_pub in MAIN, then pass it into worker
+      p_stock_list <- p_asd %...>% (function(asd) {
+        update_startup_progress(session, 55, "ASD loaded. Building stock list…")
+
+        asd_pub_dt <- data.table::data.table()
+        if (!is.null(asd) && nrow(asd)) {
+          dt <- data.table::as.data.table(asd)[, .(AssessmentKey, StockKeyLabel, AssessmentYear)]
+          dt[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+          dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+          dt[, StockKeyLabel := as.character(StockKeyLabel)]
+          asd_pub_dt <- unique(dt, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
+        }
+        rv$asd_pub <- asd_pub_dt # store for later use in server
+
+        # IMPORTANT: pass asd_pub_dt to the worker by value
+        future_promise({
+          getStockList_for_active_year(
+            active_year = yr,
+            asd_pub = asd_pub_dt
+          )
+        })
+      })
+
+      p_stock_list %...>% (function(stock_list) {
+        if (!identical(rv$last_year, yr)) {
+          return(NULL)
+        }
+
+        rv$stock_list <- data.table::as.data.table(stock_list)
+        update_startup_progress(session, 85, "Stock list ready. Rendering UI…")
+
+        rv$ready <- TRUE
+        update_startup_progress(session, 100, "Done.")
+        close_startup_modal()
+        NULL
+      }) %...!% (function(e) {
+        # show error, and DO close (or switch to easyClose TRUE)
+        update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
+        rv$ready <- FALSE
+        # either close, or leave open but allow closing
+        close_startup_modal()
+        showNotification(paste("Startup failed:", conditionMessage(e)), type = "error", duration = NULL)
+        NULL
+      })
+    },
+    ignoreInit = FALSE
+  )
+
+
+  # Published ASD accessor (replaces your asd_pub reactive)
+  asd_pub <- reactive({
+    rv$asd_pub
+  }) %>%
+    bindCache(input$selected_years, rv$ready) %>%
+    bindEvent(input$selected_years, rv$ready)
+
+
+  # eco_filter now consumes the prebuilt stock_list (NO heavy calls inside)
   eco_filter <- reactive({
     req(input$selected_locations, input$selected_years)
 
-    # stock_list_long <- fread(sprintf("Data/SID_%s/SID.csv", input$selected_years))
-    stock_list_long <- getSID(input$selected_years)
-    stock_list_long <- purrr::map_dfr(
+    if (!isTRUE(rv$ready)) {
+      return(data.table::data.table()) # do not validate here
+    }
+
+    dt <- rv$stock_list
+    data.table::setDT(dt)
+    if (is.null(dt) || !nrow(dt)) {
+      return(data.table::data.table())
+    }
+
+    out <- purrr::map_dfr(
       .x = input$selected_locations,
-      .f = function(.x) stock_list_long %>% dplyr::filter(str_detect(EcoRegion, .x))
+      .f = function(loc) dt %>% dplyr::filter(stringr::str_detect(EcoRegion, loc))
     )
 
-    if (nrow(stock_list_long) != 0) {
-      stock_list_long %>%
-        dplyr::arrange(StockKeyLabel)
-    }
+    if (nrow(out)) out %>% dplyr::arrange(StockKeyLabel) else out
   }) %>%
-    bindCache(input$selected_locations, input$selected_years) %>%
-    bindEvent(input$selected_locations, input$selected_years)
+    bindCache(input$selected_locations, input$selected_years, rv$ready) %>%
+    bindEvent(input$selected_locations, input$selected_years, rv$ready)
 
 
+  # ---- end async startup + year pipeline ---------------------------------------
+  ############################################################################################
+
+
+  ############################ Map panel server ##############################################
+  map_panel_server(input, output, session)
+  ############################ End map panel server ##############################################
+  
+  ###########################  Render stock selection table and handle selection ##################################################
   res_mod <- select_group_server(
     id = "my-filters",
     data = eco_filter,
     vars = reactive(c("StockKeyLabel", "SpeciesCommonName"))
   )
 
-  ###########################################################  Render stock selection table
-
   res_modo <- reactive({
+    if (!isTRUE(rv$ready)) {
+      validate(need(FALSE, "Loading stock list…"))
+    }
+
     validate(
-      need(!nrow(eco_filter()) == 0, "No published stocks in the selected ecoregion and year")
+      need(nrow(eco_filter()) != 0, "No published stocks in the selected ecoregion and year")
     )
 
+    base <- res_mod() %>%
+      mutate(
+        Component_clean = ifelse(is.na(AssessmentComponent) | AssessmentComponent %in% c("NA", "N.A.", ""), "", AssessmentComponent),
+        StockDisplay = ifelse(Component_clean == "",
+          StockKeyLabel,
+          paste0(StockKeyLabel, " (", Component_clean, ")")
+        )
+      )
+
     if (length(input$selected_locations) > 1) {
-      res_mod() %>%
+      base %>%
         select(
-          "StockKeyLabel",
-          "AssessmentComponent",
+          "StockDisplay",
           "EcoRegion",
           "icon",
           "SpeciesCommonName",
-          # "YearOfLastAssessment",
+          "AssessmentYear",
           "stock_location"
         ) %>%
-        mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
         rename(
-          "Stock code" = StockKeyLabel,
-          "Component" = AssessmentComponent,
+          "Stock code (component)" = StockDisplay,
           "Ecoregion" = EcoRegion,
           " " = icon,
           "Common name" = SpeciesCommonName,
-          # "Year of last assessment" = YearOfLastAssessment,
+          "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) %>%
-        {
-          if (all(nchar(.$Component) == 0)) select(., -Component) else .
-        }
+        )
     } else {
-      res_mod() %>%
+      base %>%
         select(
-          "StockKeyLabel",
-          "AssessmentComponent",
+          "StockDisplay",
           "icon",
           "SpeciesCommonName",
-          # "YearOfLastAssessment",
+          "AssessmentYear",
           "stock_location"
         ) %>%
-        mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>%
         rename(
-          "Stock code" = StockKeyLabel,
-          "Component" = AssessmentComponent,
+          "Stock code (component)" = StockDisplay,
           " " = icon,
           "Common name" = SpeciesCommonName,
-          # "Year of last assessment" = YearOfLastAssessment,
+          "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) %>%
-        {
-          if (all(nchar(.$Component) == 0)) select(., -Component) else .
-        }
+        )
     }
   })
 
@@ -132,11 +269,19 @@ server <- function(input, output, session) {
           filterable = FALSE,
           align = "center",
           aggregate = "unique"
+        ),
+        "Assessment year" = colDef(
+          align = "left",
+          width = 90, # try 70–110
+          minWidth = 70,
+          maxWidth = 110
+        ),
+        "Common name" = colDef(
+          align = "left",
+          width = 110, # try 70–110
+          minWidth = 100,
+          maxWidth = 120
         )
-        # "Year of last assessment" = colDef(
-        #   filterable = TRUE,
-        #   align = "left"
-        # )
       ),
       theme = reactableTheme(
         stripedColor = "#eff2f5",
@@ -177,7 +322,7 @@ server <- function(input, output, session) {
   })
 
 
-  ################################## Bookmarking code #############################################
+  ################################## Bookmarking #############################################
 
   # Track whether we're in a restore phase (prevents writer loops)
   nav <- reactiveValues(restoring = TRUE)
@@ -248,24 +393,16 @@ server <- function(input, output, session) {
 
   ################################ End bookmarking code ###################################################
 
-  ######### SAG data
+  ################################ SAG data and plots ############################################################
   SAG_data_reactive <- reactive({
     info <- getStockInfoFromSAG(query$assessmentkey)
 
     query$stockkeylabel <- info$StockKeyLabel
-    query$year <- info$AssessmentYear ####
+    query$year <- info$AssessmentYear
     query$sagStamp <- info$SAGStamp
-
     stock_name <- query$stockkeylabel
-    msg("downloading:", stock_name)
-
-    year <- query$year #####
-    msg("downloading:", year)
-    # filtered_row <- res_mod()[selected(), ]
-    #   # Dowload the data
+    year <- query$year
     getSAGData(query$assessmentkey)
-    # getSAGData(stock_code = stock_name, year = filtered_row$YearOfLastAssessment) %>%
-    #   filter(AssessmentKey == query$assessmentkey)
   })
 
   sagSettings <- reactive({
@@ -279,26 +416,18 @@ server <- function(input, output, session) {
       as.numeric()
   })
 
-  # ##### get link to library pdf advice
-  # advice_doi <- eventReactive((req(SAG_data_reactive())),{
-  #   SAG_data_reactive()$LinkToAdvice[1]
-  # })
-
   replaced_advice_doi <- eventReactive(req(query$assessmentkey), {
     get_link_replaced_advice(SAG_data_reactive())
   })
 
 
-  ###### info about the stock selected for top of page
+  ############################ Stock info and advice headline reactives (used in multiple tabs) #############################
   stock_info <- reactive({
     filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey, ]
     # Conditional check if filtered_row is empty
     if (nrow(filtered_row) == 0) {
       filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
     }
-
-    # filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey,]
-
 
     get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1])
   })
@@ -334,7 +463,7 @@ server <- function(input, output, session) {
     contentType = "application/zip"
   )
 
-  ######################### Stock development over time plots
+  ############################################## Stock development over time plots ######################
 
   output$plot1 <- renderPlotly({
     if (is.null(sagSettings() %>% filter(SAGChartKey == 1) %>% filter(settingKey == 22) %>% pull(settingValue) %>% nullifempty())) {
@@ -471,49 +600,27 @@ server <- function(input, output, session) {
     suppressWarnings(ICES_plot_7(advice_action_quality(), sagSettings(), query$sagStamp))
   })
 
-  #### this function is used to replace N.A. with NA in the assessment component, it's just a placeholder
-  # until I fix the ASD package
-  # replace_na_with_na_string <- function(assessment_component) {
-  #   if (assessment_component == "NA") {
-  #     return("N.A.")
-  #   } else {
-  #     return(assessment_component)
-  #   }
-  # }
-  # ##### ASD info
-  # advice_view_info <- reactive({
-  #   browser()
-  #   asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-  #   if (!is_empty(asd_record)) {
-  #     asd_record <- asd_record %>% filter(
-  #       adviceViewPublished == TRUE,
-  #       adviceStatus == "Advice",
-  #       adviceComponent == replace_na_with_na_string(query$assessmentcomponent)
-  #     )
-  #   }
-  # })
-  replace_na_with_na_string <- function(assessment_component) {
-    if (is.na(assessment_component) || assessment_component == "NA") {
-      return("N.A.")
-    } else {
-      return(assessment_component)
-    }
-  }
 
+  
   advice_view_info <- reactive({
-    asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-
-    if (!is_empty(asd_record)) {
-      target_component <- replace_na_with_na_string(query$assessmentcomponent)
-
-      asd_record <- asd_record %>% filter(
-        adviceViewPublished == TRUE,
-        adviceStatus == "Advice",
-        adviceComponent == target_component | (is.na(adviceComponent) & target_component == "N.A.")
-      )
+    req(query$assessmentkey)
+    req(rv$asd)
+    dt <- rv$asd
+    if (is.null(dt) || !nrow(dt)) {
+      return(NULL)
     }
-  })
 
+    out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
+    if (!nrow(out)) {
+      return(NULL)
+    }
+
+    pick_asd_record_for_year(
+      df = out,
+      active_year = input$selected_years,
+      assessment_component = query$assessmentcomponent
+    )
+  })
 
 
   ##### ASD info previous year
@@ -806,8 +913,6 @@ server <- function(input, output, session) {
 
 
   mod_resources_server("resources")
-
-
   share_url <- reactiveVal("")
 
   observeEvent(input$share_btn, {

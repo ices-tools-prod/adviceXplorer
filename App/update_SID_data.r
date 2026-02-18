@@ -1,243 +1,199 @@
-#' Formats, updates and save the stock list table. It also adds the hyperlinks to the table.
+#' SID cache directory
 #'
-#' @param year the year required
+#' Path to the directory containing pre-built SID cache files in RDS format.
+#' Each file is expected to be named `SID_<YEAR>.rds` (e.g., `SID_2024.rds`).
 #'
-#' @return stock list table
+#' @details
+#' The SID cache is built offline and committed/deployed with the app. The deployed
+#' Shiny app should only read these files; it should not attempt to write them.
 #'
-#' @note
-#' Can add some helpful information here
+#' @format A length-1 character string.
+#' @keywords internal
+SID_CACHE_DIR <- "Data/SID_cache"
+
+
+#' Read a SID cache snapshot for a given year
 #'
-#' @seealso
+#' Loads a pre-built SID snapshot from disk and returns it as a `data.table`.
+#' The returned table is deduplicated to one row per (`StockKeyLabel`, `EcoRegion`).
+#'
+#' @param active_year Integer-like. The year corresponding to the cache file name
+#'   `SID_<active_year>.rds`.
+#' @param dir Character. Cache directory containing `SID_<YEAR>.rds` files.
+#'   Defaults to [SID_CACHE_DIR].
+#'
+#' @return
+#' A `data.table` containing the SID snapshot for `active_year`, with duplicate
+#' rows removed using `unique(..., by = c("StockKeyLabel","EcoRegion"))`.
+#' The schema depends on how the SID cache was built, but typically includes:
+#' `StockKeyLabel`, `EcoRegion`, `YearOfLastAssessment`, `StockKeyDescription`,
+#' plus app-specific fields such as `icon` and `stock_location` if those were added
+#' at build time.
+#'
+#' @details
+#' This function is "read-only". It does not attempt to rebuild or refresh caches.
+#' If the cache file is missing, it errors with a clear message so the deployment
+#' can be fixed by rebuilding/committing the missing year.
+#'
+#' The function enforces a stable multiplicity before downstream joins by
+#' deduplicating on (`StockKeyLabel`, `EcoRegion`), preventing accidental
+#' cartesian joins when later joining with SAG-derived rows.
 #'
 #' @examples
 #' \dontrun{
-#'update_SID(2021)
+#' sid_2024 <- read_SID_cache(2024)
+#' sid_2024[1:5]
 #' }
 #'
-#' @references
+#' @export
+read_SID_cache <- function(active_year, dir = SID_CACHE_DIR) {
+    p <- file.path(dir, sprintf("SID_%d.rds", as.integer(active_year)))
+    if (!file.exists(p)) stop("Missing SID cache file: ", p)
+    sid <- readRDS(p)
+    setDT(sid)
+    sid <- unique(sid, by = c("StockKeyLabel", "EcoRegion"))
+    sid[]
+}
+
+#' App-facing SID accessor (metadata snapshot)
 #'
-#' https://sid.ices.dk/Default.aspx
+#' Thin wrapper around [read_SID_cache()] used to keep the server code readable.
+#'
+#' @param active_year Integer-like. The year to load from the SID cache.
+#'
+#' @return A `data.table` as returned by [read_SID_cache()].
+#'
+#' @details
+#' This is intentionally minimal; it exists mainly as a semantic alias
+#' ("get SID metadata for this active year") and a single place to adjust
+#' SID-reading behaviour if needed later.
+#'
+#' @examples
+#' \dontrun{
+#' sid <- getSID_meta(2023)
+#' }
 #'
 #' @export
+getSID_meta <- function(active_year) read_SID_cache(active_year)
+
+
+#' Build the stock list table for the UI for a given active year
 #'
-# update_SID <- function(year) {
-#     # mkdir(paste0("Data/SID_", year))
+#' Returns the app's stock list table by combining:
+#' 1) SID snapshot rows (one row per stock per ecoregion), and
+#' 2) a SAG-derived mapping of stock -> (AssessmentKey, AssessmentYear, Component),
+#' filtered to stocks that have published advice in ASD for the active-year context.
+#'
+#' @param active_year Integer-like. The active year selected in the app.
+#' @param asd_pub A `data.table` (or data.frame convertible to one) describing which
+#'   ASD records are considered "published" for filtering purposes.
+#'   Minimum expected columns:
+#'   - `AssessmentKey` (integer-ish)
+#'   Optional (enables fallback matching inside `filter_SAG_to_ASD_published`):
+#'   - `StockKeyLabel` (character)
+#'   - `AssessmentYear` (integer-ish)
+#'
+#' @return
+#' A `data.table` with one row per (`StockKeyLabel`, `AssessmentComponent`, `EcoRegion`)
+#' for stocks that are published in ASD. Columns are those from SID plus these
+#' SAG-derived columns:
+#' - `AssessmentKey`
+#' - `AssessmentYear`
+#' - `AssessmentComponent`
+#'
+#' If there are no published ASD rows (empty `asd_pub`), returns an empty table
+#' with the same columns as SID (`sid[0]`).
+#'
+#' @details
+#' The function uses [latest_sid_cache_year()] to decide whether `active_year`
+#' matches the most recent SID cache. If it matches, it uses `getSAG_latest_map()`
+#' (one SAG call) to obtain the map. Otherwise, it calls
+#' `build_SAG_map_for_active_year(active_year, sid, is_latest = FALSE)` which
+#' builds a historical SAG map based on assessment years implied by the SID snapshot.
+#'
+#' After filtering the SAG map to published ASD via `filter_SAG_to_ASD_published()`,
+#' it collapses duplicates to the single most recent assessment per
+#' (`StockKeyLabel`, `AssessmentComponent`) using `keep_latest_assessment_by_component()`.
+#' This prevents accidental cartesian expansion when joining to the SID ecoregion rows.
+#'
+#' @seealso
+#' [getSID_meta()], [latest_sid_cache_year()]
+#'
+#' @examples
+#' \dontrun{
+#' sid <- getSID_meta(2024)
+#' # asd_pub should typically come from a cached ASD build:
+#' # asd_pub <- unique(asd_cache[, .(AssessmentKey, StockKeyLabel, AssessmentYear)])
+#' stock_list <- getStockList_for_active_year(2024, asd_pub)
+#' }
+#'
+#' @export
+getStockList_for_active_year <- function(active_year, asd_pub) {
+    sid <- getSID_meta(active_year)
+    if (is.null(asd_pub) || !nrow(asd_pub)) {
+        return(sid[0])
+    }
 
-#     ### download SID
-#     stock_list_all <- download_SID(year)
-    
-#     # table(stock_list_long$StockKeyLabel)
-#     ### modifify SID table, 1 row == 1 Ecoregion
-#     stock_list_long <- separate_ecoregions(stock_list_all)
-#     ### add hyperlinks to table
-#     # stock_list_long <- sid_table_links(stock_list_long)
-#     stock_list_long$icon <- paste0('<img src=', "'", match_stockcode_to_illustration(stock_list_long$StockKeyLabel, stock_list_long), "'", ' height=40>') 
-#     ### add component column
-    
-#     ASDList <- icesASD::getAdviceViewRecord(year = year) %>%
-#         mutate(adviceComponent = na_if(adviceComponent, "N.A.")) %>% 
-#         rename(StockKeyLabel = stockCode, AssessmentKey = assessmentKey, AssessmentComponent = adviceComponent) %>%
-#         filter(adviceStatus == "Advice")
-        
-
-#     # stock_list_all  %>% filter(StockKeyLabel == "nep.fu.16")
-#     stock_list_long <- merge(ASDList %>% select(AssessmentKey, StockKeyLabel, AssessmentComponent), stock_list_long, by = "StockKeyLabel", all = TRUE) %>%
-#         select(!AssessmentKey.y) %>%
-#         rename(AssessmentKey = AssessmentKey.x)
-    
-    
-#     # Filter rows where AssessmentKey is NA and YearOfLastAssessment is not NA or 0
-#     valid_rows <- which(is.na(stock_list_long$AssessmentKey) &
-#         !is.na(stock_list_long$YearOfLastAssessment) &
-#         stock_list_long$YearOfLastAssessment != 0)
-
-#     # Find assessment keys for valid rows
-#     assessment_keys <- sapply(valid_rows, function(i) {
-#         icesSAG::findAssessmentKey(stock_list_long$StockKeyLabel[i],
-#             year = stock_list_long$YearOfLastAssessment[i]
-#         )
-#     })
-
-#     # Assign valid assessment keys back to the data frame
-#     valid_keys <- sapply(assessment_keys, length) > 0
-#     stock_list_long$AssessmentKey[valid_rows[valid_keys]] <- unlist(assessment_keys[valid_keys])
-#     stock_list_long <- stock_list_long %>% drop_na(AssessmentKey)
-
-    
-#     stock_list_long <- stock_list_long %>%
-#         dplyr::mutate(
-#             stock_location = parse_location_from_stock_description(StockKeyDescription)
-#         )
-
-#     return(stock_list_long)
-# }
-getSID <- function(year) {
-    message("Downloading SID data for year: ", year)
-    stock_list_all <- download_SID(year)
-
-    # Convert 1 row per ecoregion
-    stock_list_long <- separate_ecoregions(stock_list_all)
-
-    # # Add icons using stock illustrations
-    # stock_list_long$icon <- paste0(
-    #     '<img src="', match_stockcode_to_illustration(stock_list_long$StockKeyLabel, stock_list_long), '" height=40>'
-    # )
-    # Add icons using stock illustrations
-    setDT(stock_list_long)
-    stock_list_long[, icon := paste0('<img src="', match_stockcode_to_illustration(StockKeyLabel, stock_list_long), '" height=40>')]
-
-    
-    # Get unique valid years (excluding NA and 0)
-    valid_years <- unique(stock_list_long$YearOfLastAssessment)
-    valid_years <- valid_years[!is.na(valid_years) & valid_years != 0]
-
-    
-    # Parallelized API calls for ASD records
-    ASDList <- rbindlist(future_lapply(valid_years, function(y) {
-        message("Fetching ASD advice records for year: ", y)
-        as.data.table(icesASD::getAdviceViewRecord(year = y))
-    }), fill = TRUE)
-    
-    ASDList <- ASDList %>% group_by(stockCode) %>% filter(assessmentYear == max(assessmentYear, na.rm = TRUE, finite = TRUE)) %>% ungroup()
-    
-    
-    # Ensure ASDList is a valid data frame
-    if (is.null(ASDList) || identical(ASDList, list()) || nrow(ASDList) == 0) {
-        ASDList <- data.frame(
-            StockKeyLabel = character(),
-            AssessmentKey = character(),
-            AssessmentComponent = character(),
-            stringsAsFactors = FALSE
-        )
+    latest <- latest_sid_cache_year()
+    sag_map <- if (!is.na(latest) && as.integer(active_year) == latest) {
+        getSAG_latest_map()
     } else {
-        ASDList <- ASDList %>%
-            mutate(adviceComponent = na_if(adviceComponent, "N.A.")) %>%
-            rename(
-                StockKeyLabel = stockCode,
-                AssessmentKey = assessmentKey,
-                AssessmentComponent = adviceComponent
-            ) %>%
-            filter(adviceStatus == "Advice")
+        build_SAG_map_for_active_year(active_year, sid, is_latest = FALSE)
     }
-    setDT(ASDList)
 
-    # Efficient merge using data.table
-    stock_list_long <- ASDList[stock_list_long, on = "StockKeyLabel"]
-    # Merge stock list with ASDList
-    message("Merging SID and ASD records...")
-    # leaving this in for now
-    # stock_list_long <- merge(ASDList %>% select(AssessmentKey, StockKeyLabel, AssessmentComponent),
-    #     stock_list_long,
-    #     by = "StockKeyLabel",
-    #     all = TRUE
-    # ) %>%
-    #     select(-AssessmentKey.y) %>%
-    #     rename(AssessmentKey = AssessmentKey.x)
-    
-    # Filter out rows where AssessmentKey is NA and YearOfLastAssessment is NA or 0
-    missing_keys <- which(!is.na(stock_list_long$AssessmentKey) &
-        !is.na(stock_list_long$YearOfLastAssessment) &
-        stock_list_long$YearOfLastAssessment != 0)
+    sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
+    if (!nrow(sag_pub)) {
+        return(sid[0])
+    }
 
-    stock_list_long <- stock_list_long[missing_keys,]
+    # KEY LINE: remove duplicates per Stock+Component
+    sag_pub <- keep_latest_assessment_by_component(sag_pub)
 
-    
-    # if (length(missing_keys) > 0) {
-    #     message("Finding missing assessment keys...")
-
-    #     # Retrieve assessment keys (returns list)
-    #     assessment_keys <- lapply(missing_keys, function(i) {
-    #         keys <- findAssessmentKey(stock_list_long$StockKeyLabel[i],
-    #             year = stock_list_long$YearOfLastAssessment[i]
-    #         )
-    #         if (length(keys) > 0) keys[1] else NA # Take only the first key or return NA
-    #     })
-
-    #     # Convert list to vector and assign
-    #     stock_list_long$AssessmentKey[missing_keys] <- unlist(assessment_keys)
-        
-    # }
-
-
-    # this solution spreads the different calls across threads, but each thread is still calling
-    # the webservice multiple times, which is not ideal
-    # # Identify missing AssessmentKeys
-    # missing_rows <- stock_list_long %>%
-    #     filter(is.na(AssessmentKey) & !is.na(YearOfLastAssessment) & YearOfLastAssessment != 0)
-
-    # # Get unique (StockKeyLabel, YearOfLastAssessment) pairs
-    # missing_pairs <- unique(missing_rows[, c("StockKeyLabel", "YearOfLastAssessment")])
-
-    # if (nrow(missing_pairs) > 0) {
-    #     message("Finding missing assessment keys in parallel...")
-
-    #     # Parallel batch processing
-    #     results <- future_lapply(seq_len(nrow(missing_pairs)), function(i) {
-    #         stock <- missing_pairs$StockKeyLabel[i]
-    #         year <- missing_pairs$YearOfLastAssessment[i]
-
-    #         keys <- icesSAG::findAssessmentKey(stock, year)
-    #         if (length(keys) > 0) keys[1] else NA  # Return only the first key
-    #     })
-
-    #     # Convert results to a lookup table
-    #     assessment_lookup <- data.frame(
-    #         StockKeyLabel = missing_pairs$StockKeyLabel,
-    #         YearOfLastAssessment = missing_pairs$YearOfLastAssessment,
-    #         AssessmentKey = unlist(results)
-    #     )
-
-    #     # Merge back into stock_list_long
-    #     stock_list_long <- stock_list_long %>%
-    #         left_join(assessment_lookup, by = c("StockKeyLabel", "YearOfLastAssessment")) %>%
-    #         mutate(AssessmentKey = coalesce(AssessmentKey.x, AssessmentKey.y)) %>%
-    #         select(-AssessmentKey.x, -AssessmentKey.y)
-    # }
-
-    # Drop rows where AssessmentKey is still NA
-    # stock_list_long <- stock_list_long[!is.na(AssessmentKey)]
-
-    # Extract stock location
-    stock_list_long[, stock_location := parse_location_from_stock_description(StockKeyDescription)]
-
-
-    message("Data processing complete.")
-    return(stock_list_long)
+    out <- sag_pub[sid, on = "StockKeyLabel", nomatch = 0, allow.cartesian = TRUE]
+    data.table::setorder(out, StockKeyLabel, AssessmentComponent, EcoRegion)
+    out[]
 }
-#' Updates the data used to run the app
+
+
+
+#' Find the most recent year present in the SID cache directory
 #'
-#' @param mode the mode used to update the data
+#' Scans [SID_CACHE_DIR] (or `dir`) for files named `SID_<YEAR>.rds` and returns
+#' the maximum year found.
 #'
-#' @return downloads and save the data to the respective folders
+#' @param dir Character. Directory to scan for SID cache files.
+#'   Defaults to [SID_CACHE_DIR].
 #'
-#' @note
-#' Can add some helpful information here
+#' @return
+#' An integer scalar: the latest cached year, or `NA_integer_` if the directory
+#' does not exist or contains no valid `SID_<YEAR>.rds` files.
 #'
-#' @seealso
+#' @details
+#' This is used to decide whether `active_year` is the latest available SID snapshot.
+#' When `active_year` equals the latest cached year, the app can use the faster
+#' `getSAG_latest_map()` route (single SAG call) rather than building a historical map.
 #'
 #' @examples
 #' \dontrun{
-#'UpdateDataApp(mode = "LatestYear")
+#' latest_sid_cache_year()
+#' latest_sid_cache_year("Data/SID_cache")
 #' }
 #'
-#' @references
-#'
-#' https://sid.ices.dk/Default.aspx
-#'
 #' @export
-#'
-UpdateDataApp <- function(mode = c("AllYears", "LatestYear")) {
-    if (mode == "AllYears") {
-        years <- c(2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017)
-    } else if (mode == "LatestYear") {
-        years <- as.integer(format(Sys.Date(), "%Y"))
+latest_sid_cache_year <- function(dir = SID_CACHE_DIR) {
+    if (!dir.exists(dir)) {
+        return(NA_integer_)
     }
-
-    for (year in years) {
-        update_SAG(year)
-        update_SID(year)
+    files <- list.files(dir, pattern = "^SID_[0-9]{4}\\.rds$", full.names = FALSE)
+    if (!length(files)) {
+        return(NA_integer_)
     }
+    yrs <- suppressWarnings(as.integer(sub("^SID_([0-9]{4})\\.rds$", "\\1", files)))
+    yrs <- yrs[!is.na(yrs)]
+    if (!length(yrs)) {
+        return(NA_integer_)
+    }
+    max(yrs)
 }
-
 
 
