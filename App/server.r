@@ -12,35 +12,13 @@ server <- function(input, output, session) {
 
 
 
-  show_startup_modal <- function(session, title = "Loading data") {
-    showModal(modalDialog(
-      title = title,
-      easyClose = FALSE,
-      footer = NULL,
-      size = "m",
-      tagList(
-        tags$div(
-          style = "margin-top: 6px;",
-          tags$div(id = "startup-progress-text", style = "margin-bottom: 8px;", "Starting…"),
-          tags$div(
-            style = "height: 12px; background: #eee; border-radius: 6px; overflow: hidden;",
-            tags$div(
-              id = "startup-progress-bar",
-              style = "height: 100%; width: 0%; background: #f15d22;"
-            )
-          )
-        )
-      )
-    ))
-  }
+  
 
-  update_startup_progress <- function(session, value, text) {
-    session$sendCustomMessage("startupProgress", list(value = value, text = text))
-  }
+  
   # values of the query string and first visit flag
   query <- reactiveValues(query_from_table = FALSE)
 
-  close_startup_modal <- function() removeModal()
+  
   # Centralised runtime store
   rv <- reactiveValues(
     sid = NULL,
@@ -51,23 +29,23 @@ server <- function(input, output, session) {
     last_year = NULL
   )
 
-  # Optional: progress modal helpers (uses your earlier modal/progress functions)
-  # If you haven't added them, you can comment these calls out.
-  .start_loading <- function(year) {
-    rv$ready <- FALSE
-    show_startup_modal(session, paste("Loading", year))
-    update_startup_progress(session, 5, "Reading SID snapshot…")
-  }
+  # # Optional: progress modal helpers (uses your earlier modal/progress functions)
+  # # If you haven't added them, you can comment these calls out.
+  # .start_loading <- function(rv, session, year) {
+  #   rv$ready <- FALSE
+  #   show_startup_modal(session, paste("Loading advice valid in", year))
+  #   update_startup_progress(session, 5, "Fetching SID…")
+  # }
 
-  .fail_loading <- function(e) {
-    update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
-  }
+  # .fail_loading <- function(e) {
+  #   update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
+  # }
 
-  .done_loading <- function() {
-    rv$ready <- TRUE
-    update_startup_progress(session, 100, "Done.")
-    close_startup_modal()
-  }
+  # .done_loading <- function() {
+  #   rv$ready <- TRUE
+  #   update_startup_progress(session, 100, "Done.")
+  #   close_startup_modal()
+  # }
 
 
   # Year pipeline: SID (disk) -> ASD (API) -> stock list (SAG join inside)
@@ -78,7 +56,7 @@ server <- function(input, output, session) {
       rv$last_year <- yr
       rv$ready <- FALSE
 
-      show_startup_modal(session, paste("Loading", yr))
+      show_startup_modal(session, paste("Loading advice valid in", yr))
       update_startup_progress(session, 5, "Fetching SID…")
 
       # 1) SID (disk)

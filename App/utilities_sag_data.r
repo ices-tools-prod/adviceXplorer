@@ -485,6 +485,7 @@ get_scaling_factor <- function(unit_type, unit_value) {
                            "Kilograms per trap" = 1,
                            "Kilograms per hook" = 1,
                            "Kilograms per day" = 1,
+                           "kg/hr" = 1,
                            "UWTV abundance (billions)" = 1000000000,
                            "Number of individuals (billions)" = 1000000000,
                            "ratio" = 1,
