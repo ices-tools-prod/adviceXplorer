@@ -108,6 +108,22 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 
 
 
+
+choose_ecoregion_for_url <- function(EcoRegion) {
+  if (is.null(EcoRegion) || length(EcoRegion) == 0) return("")
+
+  eco <- as.character(EcoRegion)
+  eco <- eco[!is.na(eco) & nzchar(eco)]
+  if (length(eco) == 0) return("")
+
+  # If there is at least one non-Arctic, prefer the first non-Arctic.
+  non_arctic <- eco[eco != "Arctic Ocean"]
+  if (length(non_arctic) > 0) return(non_arctic[1])
+
+  # Otherwise Arctic Ocean is the only option (or all entries are Arctic)
+  return(eco[1])
+}
+
 #' Returns an HTML string containing some basic info on the selected stock and year
 #'
 #' @param CommonName
@@ -135,8 +151,12 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 #' @export
 get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description, EcoRegion, assessmentkey) {
 
+  
   fx_base <- "https://ices-tools-dev.shinyapps.io/fisheriesXplorer/"
-  eco_q   <- URLencode(EcoRegion %||% "", reserved = TRUE)
+
+  eco_one <- choose_ecoregion_for_url(EcoRegion)
+  eco_q   <- URLencode(eco_one %||% "", reserved = TRUE)
+  # eco_q   <- URLencode(EcoRegion %||% "", reserved = TRUE)
   fx_url  <- paste0(fx_base, "#eco=", eco_q, "&tab=stock_status&subtab=status_lookup&stock=", assessmentkey)
   fx_link <- paste0("<a href='", fx_url, "' target='_blank' rel='noopener'>fisheriesXplorer</a>")
 
