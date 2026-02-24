@@ -20,7 +20,7 @@
 deployApp(
   appName = "advicexplorer",
   appTitle = "advicexplorer",
-  account  = "ices-taf", #productiuon server"ices-taf" for testing "ices-tools-dev"
+  account  = "ices-tools-dev", #productiuon server"ices-taf" for testing "ices-tools-dev"
   forceUpdate = getOption("rsconnect.force.update.apps", TRUE),
   launch.browser = FALSE
 )

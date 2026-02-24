@@ -389,7 +389,7 @@ server <- function(input, output, session) {
       filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
     }
     
-    get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1], filtered_row$EcoRegion)
+    get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1], filtered_row$EcoRegion[1], query$assessmentkey)
   })
 
   output$stock_infos1 <- output$stock_infos2 <- output$stock_infos3 <- renderUI(

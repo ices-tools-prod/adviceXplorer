@@ -125,7 +125,7 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 #'
 #' @examples
 #' \dontrun{
-#' get_Stock_info(stockcode, StockDescription, assessmentYear)
+#' get_Stock_info(stockcode, StockDescription, assessmentYear, AssessmentComponent, description, EcoRegion, assessmentkey)
 #' }
 #'
 #' @references
@@ -133,11 +133,11 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 #' 
 #'
 #' @export
-get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description, EcoRegion) {
+get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description, EcoRegion, assessmentkey) {
 
-  fx_base <- "https://ices-taf.shinyapps.io/fisheriesXplorer/"
+  fx_base <- "https://ices-tools-dev.shinyapps.io/fisheriesXplorer/"
   eco_q   <- URLencode(EcoRegion %||% "", reserved = TRUE)
-  fx_url  <- paste0(fx_base, "#eco=", eco_q, "&tab=stock_status&subtab=status_lookup")
+  fx_url  <- paste0(fx_base, "#eco=", eco_q, "&tab=stock_status&subtab=status_lookup&stock=", assessmentkey)
   fx_link <- paste0("<a href='", fx_url, "' target='_blank' rel='noopener'>fisheriesXplorer</a>")
 
    stock_info_sentence <- HTML(
