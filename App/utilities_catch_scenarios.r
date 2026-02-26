@@ -61,9 +61,7 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
   catch_scenario_advice_sentence <- HTML(
     paste0(
       "<span class='hovertext' data-hover='Click here to access the pdf version of the Advice'>",
-      # "<a href='", advice_doi, "' target='_blank'>",
-      # "<a href='", catch_scenario_list$adviceDOI, "' target='_blank'>",
-      "<a href='", catch_scenario_list$adviceLink, "' target='_blank'>",
+      "<a href='", catch_scenario_list$adviceDOI, "' target='_blank'>",
       "<b><i><font size=4> Headline advice </b></i><i class='fa-solid fa-up-right-from-square'></i></font></a></span>",
       "<br/>",
       "<font size=3>", catch_scenario_list$adviceSentence, "</font>",
@@ -110,6 +108,22 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 
 
 
+
+choose_ecoregion_for_url <- function(EcoRegion) {
+  if (is.null(EcoRegion) || length(EcoRegion) == 0) return("")
+
+  eco <- as.character(EcoRegion)
+  eco <- eco[!is.na(eco) & nzchar(eco)]
+  if (length(eco) == 0) return("")
+
+  # If there is at least one non-Arctic, prefer the first non-Arctic.
+  non_arctic <- eco[eco != "Arctic Ocean"]
+  if (length(non_arctic) > 0) return(non_arctic[1])
+
+  # Otherwise Arctic Ocean is the only option (or all entries are Arctic)
+  return(eco[1])
+}
+
 #' Returns an HTML string containing some basic info on the selected stock and year
 #'
 #' @param CommonName
@@ -127,7 +141,7 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 #'
 #' @examples
 #' \dontrun{
-#' get_Stock_info(stockcode, StockDescription, assessmentYear)
+#' get_Stock_info(stockcode, StockDescription, assessmentYear, AssessmentComponent, description, EcoRegion, assessmentkey)
 #' }
 #'
 #' @references
@@ -135,29 +149,42 @@ get_Advice_View_Headline <- function(catch_scenario_list, replaced_advice_doi, t
 #' 
 #'
 #' @export
-get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description) { # StockDescription,
+get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComponent, description, EcoRegion, assessmentkey) {
+
   
-  stock_info_sentence <- HTML(
+  fx_base <- "https://ices-tools-dev.shinyapps.io/fisheriesXplorer/"
+
+  eco_one <- choose_ecoregion_for_url(EcoRegion)
+  eco_q   <- URLencode(eco_one %||% "", reserved = TRUE)
+  # eco_q   <- URLencode(EcoRegion %||% "", reserved = TRUE)
+  fx_url  <- paste0(fx_base, "#eco=", eco_q, "&tab=stock_status&subtab=status_lookup&stock=", assessmentkey)
+  fx_link <- paste0("<a href='", fx_url, "' target='_blank' rel='noopener'>fisheriesXplorer</a>")
+
+   stock_info_sentence <- HTML(
     paste0(
       "<b><i><font size=", 4, ">", "Stock information:", "</font></b></i><br/>",
       "<font size=", 3, ">", "Common name: ", "<b>", CommonName, "</b><br/>",
       "<font size=", 3, ">", "Stock code: ", "<b>", stockcode, "</b><br/>",
       "<font size=", 3, ">", "Assessment year: ", "<b>", assessmentYear, "</b><br/>",
-      if (all(AssessmentComponent != "NA") ) {
-        paste0(     
-          "<font size=", 3, ">", "Component: ", "<b>", AssessmentComponent, "</b><br/>",     
-          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b>"
-         )
+      if (all(AssessmentComponent != "NA")) {
+        paste0(
+          "<font size=", 3, ">", "Component: ", "<b>", AssessmentComponent, "</b><br/>",
+          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b><br/>",
+          "<font size=", 3, ">", "Status: ", "<b>", fx_link, "</b><br/>"
+        )
       } else {
-        paste0(          
-          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b>"
+        paste0(
+          "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b><br/>",
+          "<font size=", 3, ">", "Status: ", "<b>", fx_link, "</b><br/>"
         )
       }
     )
   )
 
-  return(stock_info_sentence)
+  stock_info_sentence
 }
+
+
 
 #' Returns an HTML string containing the catch scenario table's footnotes.
 #'

@@ -485,6 +485,7 @@ get_scaling_factor <- function(unit_type, unit_value) {
                            "Kilograms per trap" = 1,
                            "Kilograms per hook" = 1,
                            "Kilograms per day" = 1,
+                           "kg/hr" = 1,
                            "UWTV abundance (billions)" = 1000000000,
                            "Number of individuals (billions)" = 1000000000,
                            "ratio" = 1,
@@ -843,152 +844,76 @@ is_na_column <- function(dataframe, col_name) {
   return(all(is.na(dataframe[[col_name]])))
 }
 
-# # Example function to integrate getSAGData and use future_lapply
-# getSAGQualityAssessment <- function(stock_code, year, assessmentComponent) {
-#   # Define the years to fetch data for
-#   years <- c(2024, 2023, 2022, 2021, 2020)
-#   years <- years[years <= year]
-  
-#   # Asynchronously fetch SAG data for all years using future_lapply
-#   sag_data_list <- future_lapply(years, function(y) {
-#     # Find the assessment key for the given stock code and year
-#     assessmentKey <- findAssessmentKey(stock_code, year = y)
-    
-#     # Retrieve the SAG data for the assessment key
-#     getSAGData(assessmentKey)
-#   })
-  
-#   # Combine the results for all years into one data frame
-#   all_sag_data <- bind_rows(sag_data_list)
-#   browser()
-#   # Filter data based on the assessment component and other conditions
-#   filtered_data <- all_sag_data %>%
-#     filter(Purpose == "Advice" & AssessmentComponent == assessmentComponent) %>%
-#     distinct()
 
-#   # Make AssessmentYear a factor
-#   filtered_data$AssessmentYear <- as.factor(filtered_data$AssessmentYear)
-  
-#   return(filtered_data)
-# }
-
-
-# quality_assessment_data_local <- function(stock_code, year, assessmentComponent) {
-#   years <- c(2024, 2023, 2022, 2021, 2020)
-#   years <- years[years <= year]
-#   datalist <- list()
-
-#   data_temp <- try(access_sag_data_local(stock_code, years))
-#   if (isTRUE(class(data_temp) == "try-error")) {
-#     next
-#   } else {
-#     data_temp <- filter(data_temp, between(Year, 2005, 2024))
-    
-#     data_temp <- data_temp %>% select(
-#       Year,
-#       Recruitment, RecruitmentAge,UnitOfRecruitment,
-#       StockSize, Bpa, Blim, MSYBtrigger, StockSizeDescription, StockSizeUnits,
-#       FishingPressure, Flim, Fpa, FMSY, FAge, FishingPressureDescription,
-#       AssessmentYear, Purpose, SAGStamp, AssessmentComponent
-#     )
-#     data_temp$AssessmentComponent[data_temp$AssessmentComponent == "" | is.na(data_temp$AssessmentComponent) | data_temp$AssessmentComponent == 0 | data_temp$AssessmentComponent == "N.A."] <- "NA" # this probably needs to go when they update ASD from "N.A." to NA
-#     data_temp$RecruitmentAge <- as.character(data_temp$RecruitmentAge)
-#     data_temp$StockSizeDescription <- as.character(data_temp$StockSizeDescription)
-#     data_temp$StockSizeUnits <- as.character(data_temp$StockSizeUnits)
-#     data_temp$FAge <- as.character(data_temp$FAge)
-#     data_temp$FishingPressureDescription <- as.character(data_temp$FishingPressureDescription)
-#   }
-#   # take out non published data from before 2021 in big data
-#   SAG_data <- filter(data_temp, Purpose == "Advice" & AssessmentComponent == assessmentComponent) %>% distinct()
-#   # make assessmentYear as factor
-#   SAG_data$AssessmentYear <- as.factor(SAG_data$AssessmentYear)
-
-#   return(SAG_data)
-# }
-
-# library(future)
-# library(promises)
-# library(dplyr)
-
-# # Enable parallel execution with multisession
-# plan(multisession)
-
-# Optimized function using future_lapply to handle years concurrently
 getSAGQualityAssessment <- function(stock_code, year, assessmentComponent, yearsToDisplay = NULL) {
-  
-  # Define years for which you want to fetch data
-  # years <- c(2024, 2023, 2022, 2021, 2020)
-  #create a sequence of years from the variable year to 5 years prior, 
-  #if yearsToDisplay is provided then from year to yearsToDisplay years prior
+
+  # years sequence
+  year <- as.integer(year)
   if (!is.null(yearsToDisplay)) {
-    years <- seq(year, year - (yearsToDisplay - 1))
+    years <- seq(year, year - (as.integer(yearsToDisplay) - 1))
   } else {
     years <- seq(year, year - 4)
   }
-  # years <- years[years <= year]
-  
-  # Use future_lapply to fetch and process data for multiple years concurrently
-  data_temp <- future_lapply(years, function(y) {
-    # Fetch the SAG data for each year
-    # data_temp <- try(access_sag_data_local(stock_code, y))
-    assessmentKey <- findAssessmentKey(stock_code, year = y)
-    
-    # Retrieve the SAG data for the assessment key
-    # getSAGData(assessmentKey)
-    data_temp <- try(getSAGData(assessmentKey))
-    # Check for errors in fetching the data
-    if (inherits(data_temp, "try-error")) {
-      return(NULL)  # Return NULL if there's an error
-    } else {
-      # Ensure Year is numeric for filtering
-      data_temp$Year <- as.numeric(data_temp$Year)
-      data_temp$Recruitment <- as.numeric(data_temp$Recruitment)
-      data_temp$StockSize <- as.numeric(data_temp$StockSize)
-      data_temp$Bpa <- as.numeric(data_temp$Bpa)
-      data_temp$Blim <- as.numeric(data_temp$Blim)
-      data_temp$MSYBtrigger <- as.numeric(data_temp$MSYBtrigger)
-      data_temp$FishingPressure <- as.numeric(data_temp$FishingPressure)
-      data_temp$Flim <- as.numeric(data_temp$Flim)
-      data_temp$Fpa <- as.numeric(data_temp$Fpa)
-      data_temp$FMSY <- as.numeric(data_temp$FMSY)
-      # data_temp$AssessmentYear <- as.factor(data_temp$AssessmentYear)
-      # Filter the data for the required year range
-      data_temp <- filter(data_temp, between(Year, 2005, year))
-      
-      # Select necessary columns
-      data_temp <- data_temp %>% select(
-        Year,
-        Recruitment, RecruitmentAge, UnitOfRecruitment,
-        StockSize, Bpa, Blim, MSYBtrigger, StockSizeDescription, StockSizeUnits,
-        FishingPressure, Flim, Fpa, FMSY, FAge, FishingPressureDescription,
-        AssessmentYear, Purpose,  AssessmentComponent
-      )
-      
-      # Standardize the AssessmentComponent column
-      data_temp$AssessmentComponent[data_temp$AssessmentComponent == "" | is.na(data_temp$AssessmentComponent) | data_temp$AssessmentComponent == 0 | data_temp$AssessmentComponent == "N.A."] <- "NA"
-      
-      # Convert character columns
-      data_temp$RecruitmentAge <- as.character(data_temp$RecruitmentAge)
-      data_temp$UnitOfRecruitment <- as.character(data_temp$UnitOfRecruitment)
-      data_temp$StockSizeDescription <- as.character(data_temp$StockSizeDescription)
-      data_temp$StockSizeUnits <- as.character(data_temp$StockSizeUnits)
-      data_temp$FAge <- as.character(data_temp$FAge)
-      data_temp$FishingPressureDescription <- as.character(data_temp$FishingPressureDescription)
-      
-      # Filter based on Purpose and AssessmentComponent
-      SAG_data <- filter(data_temp, Purpose == "Advice" & AssessmentComponent == assessmentComponent) %>% distinct()
-      
-      # Make AssessmentYear a factor
-      SAG_data$AssessmentYear <- as.factor(SAG_data$AssessmentYear)
-      
-      return(SAG_data)
+
+  # sequential: lapply (or for-loop)
+  out_list <- lapply(years, function(y) {
+    # 1) find assessmentKey for that year
+    assessmentKey <- try(findAssessmentKey(stock_code, year = y), silent = TRUE)
+    if (inherits(assessmentKey, "try-error") || is.null(assessmentKey) || length(assessmentKey) == 0) {
+      return(NULL)
     }
+
+    # 2) fetch SAG for that assessmentKey (your getSAGData does 2 SAG calls)
+    dat <- try(getSAGData(assessmentKey), silent = TRUE)
+    if (inherits(dat, "try-error") || is.null(dat) || !nrow(dat)) {
+      return(NULL)
+    }
+
+    # 3) coerce + filter (same as your current function)
+    dat$Year <- as.numeric(dat$Year)
+    dat$Recruitment <- as.numeric(dat$Recruitment)
+    dat$StockSize <- as.numeric(dat$StockSize)
+    dat$Bpa <- as.numeric(dat$Bpa)
+    dat$Blim <- as.numeric(dat$Blim)
+    dat$MSYBtrigger <- as.numeric(dat$MSYBtrigger)
+    dat$FishingPressure <- as.numeric(dat$FishingPressure)
+    dat$Flim <- as.numeric(dat$Flim)
+    dat$Fpa <- as.numeric(dat$Fpa)
+    dat$FMSY <- as.numeric(dat$FMSY)
+
+    dat <- dplyr::filter(dat, dplyr::between(.data$Year, 2005, year))
+
+    dat <- dplyr::select(
+      dat,
+      Year,
+      Recruitment, RecruitmentAge, UnitOfRecruitment,
+      StockSize, Bpa, Blim, MSYBtrigger, StockSizeDescription, StockSizeUnits,
+      FishingPressure, Flim, Fpa, FMSY, FAge, FishingPressureDescription,
+      AssessmentYear, Purpose, AssessmentComponent
+    )
+
+    # standardise component
+    dat$AssessmentComponent[dat$AssessmentComponent == "" |
+                           is.na(dat$AssessmentComponent) |
+                           dat$AssessmentComponent == 0 |
+                           dat$AssessmentComponent == "N.A."] <- "NA"
+
+    dat$RecruitmentAge <- as.character(dat$RecruitmentAge)
+    dat$UnitOfRecruitment <- as.character(dat$UnitOfRecruitment)
+    dat$StockSizeDescription <- as.character(dat$StockSizeDescription)
+    dat$StockSizeUnits <- as.character(dat$StockSizeUnits)
+    dat$FAge <- as.character(dat$FAge)
+    dat$FishingPressureDescription <- as.character(dat$FishingPressureDescription)
+
+    # keep only advice + component
+    dat <- dplyr::filter(dat, Purpose == "Advice", AssessmentComponent == assessmentComponent) %>%
+      dplyr::distinct()
+
+    dat$AssessmentYear <- as.factor(dat$AssessmentYear)
+    dat
   })
-  
-  # Combine all the results from different years into a single data frame
-  all_sag_data <- bind_rows(data_temp)
-  
-  return(all_sag_data)
+
+  dplyr::bind_rows(out_list)
 }
 
 
@@ -998,4 +923,280 @@ info <- jsonlite::fromJSON(
       sprintf("https://sag.ices.dk/SAG_API/api/StockList?year=0&assessmentKey=%s", assessmentKey)
     )
   )
+}
+
+#' In-memory cache for SAG mapping calls
+#'
+#' A `cachem::cache_mem()` backend used to memoise calls to [getSAG_latest_map()]
+#' and [getSAG_year_map()]. The cache reduces repeated network/API calls during a
+#' Shiny session and across short time windows.
+#'
+#' @details
+#' The cache is time-limited (`max_age = 12 * 3600`, i.e., 12 hours) to balance
+#' responsiveness with data freshness.
+#'
+#' @keywords internal
+sag_cache <- cachem::cache_mem(max_age = 12 * 3600)
+
+#' Get the latest SAG stock-to-assessment mapping
+#'
+#' Fetches the latest SAG "stock advice list" and returns a normalised mapping
+#' containing the minimal columns needed by the app to connect a stock to its
+#' assessment identifiers and component.
+#'
+#' @return
+#' A `data.table` with columns:
+#' - `StockKeyLabel` (character)
+#' - `AssessmentKey` (integer)
+#' - `AssessmentYear` (integer)
+#' - `AssessmentComponent` (character; normalised so missing/blank/"N.A." variants become `"NA"`)
+#'
+#' If SAG returns an empty/non-data.frame object, returns an empty `data.table()`.
+#'
+#' @details
+#' Data source: `icesSAG::getLatestStockAdviceList()`.
+#'
+#' The function normalises varying column names returned by icesSAG by creating
+#' `StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, and `AssessmentComponent`
+#' when required. It also enforces stable types for ordering and joining, and
+#' standardises component labels using the app convention (`"NA"` for missing).
+#'
+#' The output is deduplicated on
+#' (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' This function is memoised using [sag_cache].
+#'
+#' @examples
+#' \dontrun{
+#' m <- getSAG_latest_map()
+#' m[StockKeyLabel == "dgs.27.nea"]
+#' }
+#'
+#' @export
+getSAG_latest_map <- memoise(function() {
+    dt <- icesSAG::getLatestStockAdviceList()
+    if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+        return(data.table())
+    }
+    setDT(dt)
+
+    # normalise names
+    if ("stockCode" %in% names(dt)) dt[, StockKeyLabel := stockCode]
+    if ("assessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(assessmentKey))]
+    if ("adviceComponent" %in% names(dt)) dt[, AssessmentComponent := adviceComponent]
+    if ("assessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(assessmentYear))]
+    if ("AssessmentYear" %in% names(dt) && !"AssessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+
+    out <- dt[, .(StockKeyLabel, AssessmentKey, AssessmentYear, AssessmentComponent)]
+    out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
+        !is.na(AssessmentKey) & !is.na(AssessmentYear)]
+
+    # Ensure it's character before fifelse (older years may return numeric/factor)
+    out[, AssessmentComponent := as.character(AssessmentComponent)]
+
+    out[, AssessmentComponent := data.table::fifelse(
+        is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+        "NA",
+        AssessmentComponent
+    )]
+
+
+    unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}, cache = sag_cache)
+
+
+
+#' Get the SAG stock-to-assessment mapping for a historical year
+#'
+#' Fetches the SAG list of stocks for a given year and returns a normalised mapping
+#' containing the minimal columns needed by the app.
+#'
+#' @param y Integer-like. The year to query from SAG (passed to
+#'   `icesSAG::getListStocks(year = ...)`).
+#'
+#' @return
+#' A `data.table` with columns:
+#' - `StockKeyLabel` (character)
+#' - `AssessmentKey` (integer)
+#' - `AssessmentYear` (integer)
+#' - `AssessmentComponent` (character; normalised to the app convention)
+#'
+#' If SAG returns an empty/non-data.frame object, returns an empty `data.table()`.
+#'
+#' @details
+#' Data source: `icesSAG::getListStocks(year = y)`.
+#'
+#' This is used when the active year is not the latest SID snapshot and the app
+#' needs to build an historical map spanning multiple assessment years.
+#'
+#' The output is deduplicated on
+#' (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' This function is memoised using [sag_cache].
+#'
+#' @examples
+#' \dontrun{
+#' m_2021 <- getSAG_year_map(2021)
+#' }
+#'
+
+#' @export
+getSAG_year_map <- memoise(function(y) {
+    dt <- icesSAG::getListStocks(year = as.integer(y))
+    if (is.null(dt) || length(dt) == 0 || NROW(dt) == 0 || !is.data.frame(dt)) {
+        return(data.table())
+    }
+    setDT(dt)
+
+    # normalise (adjust if icesSAG returns different names)
+    if ("stockCode" %in% names(dt)) dt[, StockKeyLabel := stockCode]
+    if ("assessmentKey" %in% names(dt)) dt[, AssessmentKey := suppressWarnings(as.integer(assessmentKey))]
+    if ("adviceComponent" %in% names(dt)) dt[, AssessmentComponent := adviceComponent]
+    if ("assessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(assessmentYear))]
+    if ("AssessmentYear" %in% names(dt) && !"AssessmentYear" %in% names(dt)) dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+
+    out <- dt[, .(StockKeyLabel, AssessmentKey, AssessmentYear, AssessmentComponent)]
+    out <- out[!is.na(StockKeyLabel) & nzchar(StockKeyLabel) &
+        !is.na(AssessmentKey) & !is.na(AssessmentYear)]
+    # Ensure it's character before fifelse (older years may return numeric/factor)
+    out[, AssessmentComponent := as.character(AssessmentComponent)]
+
+    out[, AssessmentComponent := data.table::fifelse(
+        is.na(AssessmentComponent) | AssessmentComponent %in% c("", "N.A.", "N.A", "NA"),
+        "NA",
+        AssessmentComponent
+    )]
+
+
+    unique(out, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}, cache = sag_cache)
+
+
+#' Build a SAG mapping table for an active year
+#'
+#' Returns a SAG mapping table appropriate for the app's `active_year`.
+#' For the latest configuration this can be the single-call "latest" map; for
+#' historical configurations this function builds a pooled map across the set of
+#' assessment years implied by the SID snapshot.
+#'
+#' @param active_year Integer-like. The year selected in the app.
+#' @param sid_dt A SID snapshot `data.frame`/`data.table` containing a
+#'   `YearOfLastAssessment` column. Used to infer which SAG years to fetch when
+#'   building an historical map.
+#' @param is_latest Logical. If `TRUE`, return [getSAG_latest_map()] directly.
+#'   If `FALSE`, build a historical map based on `sid_dt`. Defaults to `TRUE`.
+#'
+#' @return
+#' A `data.table` with columns `StockKeyLabel`, `AssessmentKey`, `AssessmentYear`,
+#' `AssessmentComponent`, potentially containing multiple assessment years and
+#' components per stock (to be deduplicated later as needed).
+#'
+#' @details
+#' Historical mode (`is_latest = FALSE`):
+#' 1. Extract unique `YearOfLastAssessment` values from `sid_dt`.
+#' 2. Keep valid years (`!= 0`, non-NA) and restrict to `<= active_year`.
+#' 3. Ensure `active_year` is included in the year set (so the pool covers the active view).
+#' 4. Fetch each year via [getSAG_year_map()] and row-bind.
+#' 5. Drop rows with `AssessmentYear > active_year` (safety guard).
+#' 6. Deduplicate on (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' @examples
+#' \dontrun{
+#' sid <- getSID_meta(2022)
+#' sag_hist <- build_SAG_map_for_active_year(2022, sid, is_latest = FALSE)
+#' }
+#'
+
+#' @export
+build_SAG_map_for_active_year <- function(active_year, sid_dt, is_latest = TRUE) {
+    active_year <- as.integer(active_year)
+    if (is_latest) {
+        return(getSAG_latest_map())
+    }
+
+    # Historical: fetch only years implied by SID snapshot
+    setDT(sid_dt)
+    yrs <- sort(unique(as.integer(sid_dt$YearOfLastAssessment)))
+    yrs <- yrs[!is.na(yrs) & yrs != 0 & yrs <= active_year]
+    if (!(active_year %in% yrs)) yrs <- c(yrs, active_year)
+    if (length(yrs) == 0) {
+        return(data.table())
+    }
+
+    sag_all <- rbindlist(lapply(yrs, getSAG_year_map), fill = TRUE)
+    sag_all <- sag_all[AssessmentYear <= active_year]
+    unique(sag_all, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+}
+
+
+
+#' Filter SAG mappings to stocks published in ASD (while keeping SAG components)
+#'
+#' Filters a SAG mapping table to retain only records that correspond to published
+#' ASD advice entries. This is used to ensure the UI stock list only shows stocks
+#' that have published advice in ASD, while still relying on SAG as the source of
+#' truth for component values.
+#'
+#' @param sag_dt A `data.frame`/`data.table` produced by [getSAG_latest_map()],
+#'   [getSAG_year_map()], or [build_SAG_map_for_active_year()]. Must contain at least
+#'   `AssessmentKey`, `StockKeyLabel`, and `AssessmentYear`.
+#' @param asd_dt A `data.frame`/`data.table` describing published ASD advice entries.
+#'   Minimum expected columns:
+#'   - `AssessmentKey`
+#'   Optional (enables fallback matching):
+#'   - `StockKeyLabel`
+#'   - `AssessmentYear`
+#'
+#' @return
+#' A `data.table` subset of `sag_dt` containing only rows that match the published
+#' ASD set. If either input is empty, returns `sag_dt[0]` (empty table with SAG columns).
+#'
+#' @details
+#' Matching strategy:
+#' 1. Primary match by `AssessmentKey` for ASD rows where `AssessmentKey` is available.
+#' 2. Fallback match by (`StockKeyLabel`, `AssessmentYear`) for ASD rows where
+#'    `AssessmentKey` is missing or cannot be relied upon.
+#'
+#' The output is deduplicated on
+#' (`StockKeyLabel`, `AssessmentKey`, `AssessmentYear`, `AssessmentComponent`).
+#'
+#' This function is deliberately "component-agnostic": it filters on publication
+#' status but preserves the component values coming from SAG.
+#'
+#' @examples
+#' \dontrun{
+#' sag_map <- getSAG_latest_map()
+#' asd_pub <- unique(asd_cache[, .(AssessmentKey, StockKeyLabel, AssessmentYear)])
+#' sag_pub <- filter_SAG_to_ASD_published(sag_map, asd_pub)
+#' }
+#'
+
+#' @export
+filter_SAG_to_ASD_published <- function(sag_dt, asd_dt) {
+    setDT(sag_dt)
+    setDT(asd_dt)
+
+    if (nrow(sag_dt) == 0 || nrow(asd_dt) == 0) {
+        return(sag_dt[0])
+    }
+
+    # 1) match by AssessmentKey where possible
+    a1 <- asd_dt[!is.na(AssessmentKey), .(AssessmentKey)]
+    setkey(a1, AssessmentKey)
+    sag1 <- sag_dt[a1, on = "AssessmentKey", nomatch = 0]
+
+    # 2) fallback: stock+year match for ASD rows with missing AssessmentKey
+    a2 <- asd_dt[is.na(AssessmentKey), .(StockKeyLabel, AssessmentYear)]
+    if (nrow(a2) > 0) {
+        setkey(a2, StockKeyLabel, AssessmentYear)
+        setkey(sag_dt, StockKeyLabel, AssessmentYear)
+        sag2 <- sag_dt[a2, nomatch = 0]
+        sag_keep <- unique(rbindlist(list(sag1, sag2), fill = TRUE),
+            by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent")
+        )
+    } else {
+        sag_keep <- unique(sag1, by = c("StockKeyLabel", "AssessmentKey", "AssessmentYear", "AssessmentComponent"))
+    }
+
+    sag_keep[]
 }

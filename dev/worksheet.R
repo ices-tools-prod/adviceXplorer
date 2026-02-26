@@ -3355,4 +3355,5 @@ sagList <- jsonlite::fromJSON(
   )
 
 
-icesSAG::getSAGSettingsForAStock(c(20911))
+icesSAG::getSAGSettingsForAStock(20911)
+icesSAG

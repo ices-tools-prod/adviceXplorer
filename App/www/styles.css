@@ -119,10 +119,10 @@ table.dataTable tbody tr:nth-child(odd) {background-color: #E6E7E8 !important;}
 }
 
 .btn-default {
-  color: #ffffff;
-  background-image: linear-gradient(#b6cc54, #aec640 60%, #b6cc54); /*linear-gradient(#f69371, #F15D2A 50%, #f69371)   #bad5ce, #9AC2B7 50%, #bad5ce*/
+  color: #070707;
+  background-image: linear-gradient(to right, #f47d4e 0%, #f4924e 100%); /*linear-gradient(#f69371, #F15D2A 50%, #f69371)   #bad5ce, #9AC2B7 50%, #bad5ce*/
   background-repeat: no-repeat;
-  background-color: #aec640;
+  background-color: #f47d4e;
   border-color: rgba(0,0,0,0.1);
   border-bottom: 1px solid #e6e6e6;
 }

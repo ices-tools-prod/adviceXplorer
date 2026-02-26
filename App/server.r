@@ -1,122 +1,216 @@
-
-msg <- function(...) {
-  emph <- "\n****************\n"
-  cat(emph, ..., emph)
-}
-
-
 # required if using most recent version of sf
 sf::sf_use_s2(FALSE)
-
-
-
-
 
 
 
 ############# Start server function ################
 
 server <- function(input, output, session) {
-  msg("server loop start:\n  ", getwd())
-  shinyjs::disable(selector = '.navbar-nav a[data-value="Development over time"')
-  shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"')
-  shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"')
+  shinyjs::disable(selector = '.navbar-nav a[data-value="Development over time"]')
+  shinyjs::disable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
+  shinyjs::disable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
+
+
+
+  
+
   
   # values of the query string and first visit flag
   query <- reactiveValues(query_from_table = FALSE)
 
-  map_panel_server(input, output, session)
   
-  ###########################################################  function to use the input from the maps and the sid filtering
+  # Centralised runtime store
+  rv <- reactiveValues(
+    sid = NULL,
+    asd = NULL,
+    asd_pub = data.table::data.table(),
+    stock_list = data.table::data.table(),
+    ready = FALSE,
+    last_year = NULL
+  )
 
 
-  # Update the year of selection
+  # Year pipeline: SID (disk) -> ASD (API) -> stock list (SAG join inside)
+  observeEvent(input$selected_years,
+    {
+      req(input$selected_years)
+      yr <- as.integer(input$selected_years)
+      rv$last_year <- yr
+      rv$ready <- FALSE
 
+      show_startup_modal(session, paste("Loading advice valid in", yr))
+      update_startup_progress(session, 5, "Fetching SID…")
+
+      # 1) SID (disk)
+      p_sid <- future_promise({
+        getSID_meta(yr)
+      })
+
+      # 2) ASD (API) depends on SID
+      p_asd <- p_sid %...>% (function(sid) {
+        update_startup_progress(session, 20, "SID loaded. Fetching ASD…")
+        future_promise({
+          build_ASD_cache_for_active_year(yr, sid)
+        }) %...>% (function(asd) {
+          # store SID/ASD in main process (NOT in workers)
+          rv$sid <- sid
+          rv$asd <- asd
+          asd
+        })
+      })
+
+      # 3) Build asd_pub in MAIN, then pass it into worker
+      p_stock_list <- p_asd %...>% (function(asd) {
+        update_startup_progress(session, 55, "ASD loaded. Building stock list…")
+
+        asd_pub_dt <- data.table::data.table()
+        if (!is.null(asd) && nrow(asd)) {
+          dt <- data.table::as.data.table(asd)[, .(AssessmentKey, StockKeyLabel, AssessmentYear)]
+          dt[, AssessmentKey := suppressWarnings(as.integer(AssessmentKey))]
+          dt[, AssessmentYear := suppressWarnings(as.integer(AssessmentYear))]
+          dt[, StockKeyLabel := as.character(StockKeyLabel)]
+          asd_pub_dt <- unique(dt, by = c("AssessmentKey", "StockKeyLabel", "AssessmentYear"))
+        }
+        rv$asd_pub <- asd_pub_dt # store for later use in server
+
+        # IMPORTANT: pass asd_pub_dt to the worker by value
+        future_promise({
+          getStockList_for_active_year(
+            active_year = yr,
+            asd_pub = asd_pub_dt
+          )
+        })
+      })
+
+      p_stock_list %...>% (function(stock_list) {
+        if (!identical(rv$last_year, yr)) {
+          return(NULL)
+        }
+
+        rv$stock_list <- data.table::as.data.table(stock_list)
+        update_startup_progress(session, 85, "Stock list ready. Rendering UI…")
+
+        rv$ready <- TRUE
+        update_startup_progress(session, 100, "Done.")
+        close_startup_modal()
+        NULL
+      }) %...!% (function(e) {
+        # show error, and DO close (or switch to easyClose TRUE)
+        update_startup_progress(session, 100, paste("Loading failed:", conditionMessage(e)))
+        rv$ready <- FALSE
+        # either close, or leave open but allow closing
+        close_startup_modal()
+        showNotification(paste("Startup failed:", conditionMessage(e)), type = "error", duration = NULL)
+        NULL
+      })
+    },
+    ignoreInit = FALSE
+  )
+
+
+  # Published ASD accessor (replaces your asd_pub reactive)
+  asd_pub <- reactive({
+    rv$asd_pub
+  }) %>%
+    bindCache(input$selected_years, rv$ready) %>%
+    bindEvent(input$selected_years, rv$ready)
+
+
+  # eco_filter now consumes the prebuilt stock_list (NO heavy calls inside)
   eco_filter <- reactive({
     req(input$selected_locations, input$selected_years)
-    
-    # stock_list_long <- fread(sprintf("Data/SID_%s/SID.csv", input$selected_years))
-    stock_list_long <- getSID(input$selected_years)
-    stock_list_long <- purrr::map_dfr(
+
+    if (!isTRUE(rv$ready)) {
+      return(data.table::data.table()) # do not validate here
+    }
+
+    dt <- rv$stock_list
+    data.table::setDT(dt)
+    if (is.null(dt) || !nrow(dt)) {
+      return(data.table::data.table())
+    }
+
+    out <- purrr::map_dfr(
       .x = input$selected_locations,
-      .f = function(.x) stock_list_long %>% dplyr::filter(str_detect(EcoRegion, .x))
+      .f = function(loc) dt %>% dplyr::filter(stringr::str_detect(EcoRegion, loc))
     )
-    
-    if (nrow(stock_list_long) != 0) {
-    stock_list_long %>% 
-      dplyr::arrange(StockKeyLabel)
-    
-    
-      
-  }
+
+    if (nrow(out)) out %>% dplyr::arrange(StockKeyLabel) else out
   }) %>%
-    bindCache(input$selected_locations, input$selected_years) %>%
-    bindEvent(input$selected_locations, input$selected_years)
+    bindCache(input$selected_locations, input$selected_years, rv$ready) %>%
+    bindEvent(input$selected_locations, input$selected_years, rv$ready)
 
 
+  # ---- end async startup + year pipeline ---------------------------------------
+  ############################################################################################
+
+
+  ############################ Map panel server ##############################################
+  map_panel_server(input, output, session)
+  ############################ End map panel server ##############################################
+  
+  ###########################  Render stock selection table and handle selection ##################################################
   res_mod <- select_group_server(
     id = "my-filters",
     data = eco_filter,
     vars = reactive(c("StockKeyLabel", "SpeciesCommonName"))
   )
-  
-  ###########################################################  Render stock selection table
 
   res_modo <- reactive({
-    
+    if (!isTRUE(rv$ready)) {
+      validate(need(FALSE, "Loading stock list…"))
+    }
+
     validate(
-      need(!nrow(eco_filter()) == 0, "No published stocks in the selected ecoregion and year")
+      need(nrow(eco_filter()) != 0, "No published stocks in the selected ecoregion and year")
     )
-    
+
+    base <- res_mod() %>%
+      mutate(
+        Component_clean = ifelse(is.na(AssessmentComponent) | AssessmentComponent %in% c("NA", "N.A.", ""), "", AssessmentComponent),
+        StockDisplay = ifelse(Component_clean == "",
+          StockKeyLabel,
+          paste0(StockKeyLabel, " (", Component_clean, ")")
+        )
+      )
+
     if (length(input$selected_locations) > 1) {
-      res_mod() %>%
+      base %>%
         select(
-          "StockKeyLabel",
-          "AssessmentComponent",
+          "StockDisplay",
           "EcoRegion",
           "icon",
           "SpeciesCommonName",
-          # "YearOfLastAssessment",
+          "AssessmentYear",
           "stock_location"
         ) %>%
-        mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>% 
         rename(
-          "Stock code" = StockKeyLabel,
-          "Component" = AssessmentComponent,
+          "Stock code (component)" = StockDisplay,
           "Ecoregion" = EcoRegion,
           " " = icon,
           "Common name" = SpeciesCommonName,
-          # "Year of last assessment" = YearOfLastAssessment,
+          "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) %>%
-        {
-          if (all(nchar(.$Component) == 0)) select(., -Component) else .
-        }
+        )
     } else {
-      res_mod() %>%
+      base %>%
         select(
-          "StockKeyLabel",
-          "AssessmentComponent",
+          "StockDisplay",
           "icon",
           "SpeciesCommonName",
-          # "YearOfLastAssessment",
+          "AssessmentYear",
           "stock_location"
         ) %>%
-        mutate(AssessmentComponent = ifelse((is.na(AssessmentComponent)) | AssessmentComponent == "NA", "", AssessmentComponent)) %>% 
         rename(
-          "Stock code" = StockKeyLabel,
-          "Component" = AssessmentComponent,
+          "Stock code (component)" = StockDisplay,
           " " = icon,
           "Common name" = SpeciesCommonName,
-          # "Year of last assessment" = YearOfLastAssessment,
+          "Assessment year" = AssessmentYear,
           "Location" = stock_location
-        ) %>%
-        {
-          if (all(nchar(.$Component) == 0)) select(., -Component) else .
-        }
+        )
     }
   })
-  
+
 
   output$tbl <- renderReactable({
     reactable(res_modo(),
@@ -135,11 +229,19 @@ server <- function(input, output, session) {
           filterable = FALSE,
           align = "center",
           aggregate = "unique"
+        ),
+        "Assessment year" = colDef(
+          align = "left",
+          width = 90, # try 70–110
+          minWidth = 70,
+          maxWidth = 110
+        ),
+        "Common name" = colDef(
+          align = "left",
+          width = 110, # try 70–110
+          minWidth = 100,
+          maxWidth = 120
         )
-        # "Year of last assessment" = colDef(
-        #   filterable = TRUE,
-        #   align = "left"
-        # )
       ),
       theme = reactableTheme(
         stripedColor = "#eff2f5",
@@ -148,146 +250,180 @@ server <- function(input, output, session) {
       )
     )
   })
-  
-  
-  
+
+
+
   selected <- reactive(getReactableState("tbl", "selected"))
 
+
   observeEvent(selected(), {
-    shinyjs::enable(selector = '.navbar-nav a[data-value="Development over time"')
-    shinyjs::enable(selector = '.navbar-nav a[data-value="Quality of assessment"')
-    shinyjs::enable(selector = '.navbar-nav a[data-value="Catch scenarios"')
-    
+    shinyjs::enable(selector = '.navbar-nav a[data-value="Development over time"]')
+    shinyjs::enable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
+    shinyjs::enable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
+
     filtered_row <- res_mod()[selected(), ]
-    updateQueryString(paste0("?assessmentkey=", filtered_row$AssessmentKey, "&assessmentcomponent=",filtered_row$AssessmentComponent), mode = "push") ####
+
+    # Update server-side state immediately
+    query$assessmentkey <- filtered_row$AssessmentKey
+    query$assessmentcomponent <- filtered_row$AssessmentComponent %||% "NA"
+
+    # Write URL (push to history)
+    nav$restoring <- TRUE
+    updateQueryString(
+      make_url_search(query$assessmentkey, query$assessmentcomponent, "Development over time"),
+      mode = "push"
+    )
 
     query$query_from_table <- TRUE
 
-    msg("stock selected from table:", filtered_row$StockKeyLabel)
-    msg("year of SAG/SID selected from table:", input$selected_years) #####
-
-    ### this allow to trigger the "Development over time" tab when the radio button is clicked
     updateNavbarPage(session, "tabset", selected = "Development over time")
-    
-  })
-  
-  ###### this runs only when the app loads from a URL
-  observe({
-    # read url string
-    query_string <- getQueryString()
-    names(query_string) <- tolower(names(query_string))
 
-    query$assessmentkey <- query_string$assessmentkey
-    query$assessmentcomponent <-  modify_assessment_component(query_string$assessmentcomponent)
-    
-
-    if (!is.null(query$assessmentkey) && !query$query_from_table) {
-      # info <- icesSAG::getFishStockReferencePoints(query$assessmentkey)
-      info <- getStockInfoFromSAG(query$assessmentkey)
-      query$stockkeylabel <- info$StockKeyLabel
-      query$year <- info$AssessmentYear
-
-
-      msg("stock selected from url:", query$stockkeylabel)
-      msg("year of SAG/SID selected from url:", query$year)
-
-      updateNavbarPage(session, "tabset", selected = "Development over time")
-      shinyjs::enable(selector = '.navbar-nav a[data-value="Development over time"')
-      shinyjs::enable(selector = '.navbar-nav a[data-value="Quality of assessment"')
-      shinyjs::enable(selector = '.navbar-nav a[data-value="Catch scenarios"')
-    }
+    nav$restoring <- FALSE
   })
 
-  ######### SAG data
+
+  ################################## Bookmarking #############################################
+
+  # Track whether we're in a restore phase (prevents writer loops)
+  nav <- reactiveValues(restoring = TRUE)
+
+  observeEvent(session$clientData$url_search,
+    {
+      nav$restoring <- TRUE
+      on.exit(
+        {
+          nav$restoring <- FALSE
+        },
+        add = TRUE
+      )
+
+      qs <- shiny::parseQueryString(session$clientData$url_search %||% "")
+      names(qs) <- tolower(names(qs))
+
+      ak <- qs$assessmentkey %||% ""
+      ac0 <- qs$assessmentcomponent
+      tab <- qs$tab %||% ""
+
+      # Backward compatibility: old URLs had no tab -> go to Development over time
+      if (!nzchar(tab) && nzchar(ak)) tab <- "Development over time"
+      # If no stock and no tab specified, do nothing (stay at UI default)
+
+      # Only update stock state if assessmentkey actually changed (prevents refetch on tab-only changes)
+      cur_ak <- isolate(query$assessmentkey %||% "")
+
+      if (nzchar(ak) && !identical(ak, cur_ak) && !isTRUE(query$query_from_table)) {
+        query$assessmentkey <- ak
+
+        if (is.null(ac0) || !nzchar(ac0)) ac0 <- "NA"
+        query$assessmentcomponent <- modify_assessment_component(ac0)
+
+        info <- getStockInfoFromSAG(query$assessmentkey)
+        query$stockkeylabel <- info$StockKeyLabel
+        query$year <- info$AssessmentYear
+
+        shinyjs::enable(selector = '.navbar-nav a[data-value="Development over time"]')
+        shinyjs::enable(selector = '.navbar-nav a[data-value="Quality of assessment"]')
+        shinyjs::enable(selector = '.navbar-nav a[data-value="Catch scenarios"]')
+      }
+
+      # Restore tab (even if stock already loaded)
+      if (nzchar(tab) && !identical(isolate(input$tabset %||% ""), tab)) {
+        updateNavbarPage(session, "tabset", selected = tab)
+      }
+    },
+    ignoreInit = FALSE
+  )
+
+
+  observeEvent(input$tabset,
+    {
+      if (isTRUE(nav$restoring)) {
+        return()
+      }
+
+      new_search <- make_url_search(query$assessmentkey, query$assessmentcomponent, input$tabset)
+      cur_search <- session$clientData$url_search %||% ""
+
+      if (!identical(cur_search, new_search)) {
+        updateQueryString(new_search, mode = "replace")
+      }
+    },
+    ignoreInit = TRUE
+  )
+
+  ################################ End bookmarking code ###################################################
+
+  ################################ SAG data and plots ############################################################
   SAG_data_reactive <- reactive({
     info <- getStockInfoFromSAG(query$assessmentkey)
-      
+
     query$stockkeylabel <- info$StockKeyLabel
-    query$year <- info$AssessmentYear ####
+    query$year <- info$AssessmentYear
     query$sagStamp <- info$SAGStamp
-
     stock_name <- query$stockkeylabel
-    msg("downloading:", stock_name)
-
-    year <- query$year #####
-    msg("downloading:", year)
-    # filtered_row <- res_mod()[selected(), ]
-    #   # Dowload the data
+    year <- query$year
     getSAGData(query$assessmentkey)
-    # getSAGData(stock_code = stock_name, year = filtered_row$YearOfLastAssessment) %>%
-    #   filter(AssessmentKey == query$assessmentkey)
   })
-  
+
   sagSettings <- reactive({
     temp_setting <- icesSAG::getSAGSettingsForAStock(query$assessmentkey)
     temp_setting[!(temp_setting$settingValue == ""), ]
+  })
 
-  })  
-  
   drop_plots <- reactive({
-      filter(sagSettings(), settingKey == 22 & settingValue == "yes" | settingValue == "y") %>%
+    filter(sagSettings(), settingKey == 22 & settingValue == "yes" | settingValue == "y") %>%
       pull(SAGChartKey) %>%
-      as.numeric})
-  
-# ##### get link to library pdf advice
-# advice_doi <- eventReactive((req(SAG_data_reactive())),{  
-#   SAG_data_reactive()$LinkToAdvice[1]
-# })
+      as.numeric()
+  })
 
-replaced_advice_doi <- eventReactive(req(query$assessmentkey), {
-  get_link_replaced_advice(SAG_data_reactive())
-})
+  replaced_advice_doi <- eventReactive(req(query$assessmentkey), {
+    get_link_replaced_advice(SAG_data_reactive())
+  })
 
 
-###### info about the stock selected for top of page
-stock_info <- reactive({
+  ############################ Stock info and advice headline reactives (used in multiple tabs) #############################
+  stock_info <- reactive({
+    filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey, ]
+    # Conditional check if filtered_row is empty
+    if (nrow(filtered_row) == 0) {
+      filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
+    }
+    
+    get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel, SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1], filtered_row$EcoRegion, query$assessmentkey)
+  })
 
-  filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey,]
-  # Conditional check if filtered_row is empty
-  if (nrow(filtered_row) == 0) {
-    filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
-  }
-
-  # filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey,] 
-
-  
-  get_Stock_info(filtered_row$SpeciesCommonName[1], query$stockkeylabel,  SAG_data_reactive()$AssessmentYear[1], query$assessmentcomponent, SAG_data_reactive()$StockDescription[1])
-  
-}) 
-
-output$stock_infos1 <- output$stock_infos2 <- output$stock_infos3 <- renderUI(
-  stock_info()
+  output$stock_infos1 <- output$stock_infos2 <- output$stock_infos3 <- renderUI(
+    stock_info()
   )
 
-##### advice headline (right side of page)
-advice_view_headline <- reactive({
-  get_Advice_View_Headline(advice_view_info(), replaced_advice_doi(), input$tabset, catch_scenario_table()$table, drop_plots())
-}) 
+  ##### advice headline (right side of page)
+  advice_view_headline <- reactive({
+    get_Advice_View_Headline(advice_view_info(), replaced_advice_doi(), input$tabset, catch_scenario_table()$table, drop_plots())
+  })
 
-output$Advice_Headline1 <- output$Advice_Headline2 <- output$Advice_Headline3 <- renderUI({
-  advice_view_headline()  
-}) 
+  output$Advice_Headline1 <- output$Advice_Headline2 <- output$Advice_Headline3 <- renderUI({
+    advice_view_headline()
+  })
 
 
-output$download_SAG_Data <- downloadHandler(
+  output$download_SAG_Data <- downloadHandler(
     filename = paste0("adviceXplorer_data-", Sys.Date(), ".zip"),
     content = function(fname) {
-      
       fs <- c("Disclaimer.txt", paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_SAG_data.csv"))
 
-      data_out <- SAG_data_reactive() %>% 
+      data_out <- SAG_data_reactive() %>%
         select(where(~ !all(is.na(.)))) %>%
         mutate(across(where(is.numeric), ~ format(., decimal.mark = ".", scientific = FALSE)))
-      
-      write.csv(data_out, file = paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_SAG_data.csv"), row.names = FALSE, quote = FALSE)      
-      write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"),  file = "Disclaimer.txt", row.names = FALSE)
-      
-      zip::zip(zipfile=fname, files=fs)
+
+      write.csv(data_out, file = paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_SAG_data.csv"), row.names = FALSE, quote = FALSE)
+      write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"), file = "Disclaimer.txt", row.names = FALSE)
+
+      zip::zip(zipfile = fname, files = fs)
     },
     contentType = "application/zip"
   )
 
-######################### Stock development over time plots
+  ############################################## Stock development over time plots ######################
 
   output$plot1 <- renderPlotly({
     if (is.null(sagSettings() %>% filter(SAGChartKey == 1) %>% filter(settingKey == 22) %>% pull(settingValue) %>% nullifempty())) {
@@ -311,7 +447,7 @@ output$download_SAG_Data <- downloadHandler(
       return(NULL)
     }
   })
-  
+
   output$plot3 <- renderPlotly({
     if (is.null(sagSettings() %>% filter(SAGChartKey == 3) %>% filter(settingKey == 22) %>% pull(settingValue) %>% nullifempty())) {
       validate(
@@ -322,7 +458,7 @@ output$download_SAG_Data <- downloadHandler(
       return(NULL)
     }
   })
-  
+
   output$plot4 <- renderPlotly({
     if (is.null(sagSettings() %>% filter(SAGChartKey == 4) %>% filter(settingKey == 22) %>% pull(settingValue) %>% nullifempty())) {
       validate(
@@ -333,7 +469,7 @@ output$download_SAG_Data <- downloadHandler(
       return(NULL)
     }
   })
-  
+
   output$customPlot1 <- renderPlotly({
     if (nrow(sagSettings() %>% filter(SAGChartKey == 15)) >= 1) {
       suppressWarnings(ICES_custom_plot(SAG_data_reactive(), sagSettings(), ChartKey = 15, query$sagStamp))
@@ -366,7 +502,7 @@ output$download_SAG_Data <- downloadHandler(
     }
   })
 
-####################### Quality of assessment data
+  ####################### Quality of assessment data
   advice_action_quality <- reactive({
     # Extract custom data and graph type
     yearsToDisplay <- sagSettings() %>%
@@ -375,27 +511,26 @@ output$download_SAG_Data <- downloadHandler(
       # str_split(",", simplify = TRUE) %>%
       as.numeric() %>%
       nullifempty()
-    
+
     getSAGQualityAssessment(query$stockkeylabel, query$year, query$assessmentcomponent, yearsToDisplay)
   })
-  
 
 
-##### button to download SAG data for quality of assessemnt
+
+  ##### button to download SAG data for quality of assessemnt
   output$download_QualAss_Data <- downloadHandler(
     filename = paste0("adviceXplorer_data-", Sys.Date(), ".zip"),
     content = function(fname) {
-      
       fs <- c("Disclaimer.txt", paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_QualityofAssessment_data.csv"))
 
-      data_out_qual <- advice_action_quality() %>% 
+      data_out_qual <- advice_action_quality() %>%
         select(where(~ !all(is.na(.)))) %>%
         mutate(across(where(is.numeric), ~ format(., decimal.mark = ".", scientific = FALSE)))
 
-        write.csv(data_out_qual, file = paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_QualityofAssessment_data.csv"), row.names = FALSE, quote = FALSE)
-        write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"),  file = "Disclaimer.txt", row.names = FALSE)
-      
-      zip::zip(zipfile=fname, files=fs)
+      write.csv(data_out_qual, file = paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_QualityofAssessment_data.csv"), row.names = FALSE, quote = FALSE)
+      write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"), file = "Disclaimer.txt", row.names = FALSE)
+
+      zip::zip(zipfile = fname, files = fs)
     },
     contentType = "application/zip"
   )
@@ -408,7 +543,6 @@ output$download_SAG_Data <- downloadHandler(
     )
 
     suppressWarnings(ICES_plot_5(advice_action_quality(), sagSettings(), query$sagStamp))
-
   })
   output$plot6 <- renderPlotly({
     validate(
@@ -417,7 +551,6 @@ output$download_SAG_Data <- downloadHandler(
     )
 
     suppressWarnings(ICES_plot_6(advice_action_quality(), sagSettings(), query$sagStamp))
-
   })
   output$plot7 <- renderPlotly({
     validate(
@@ -427,373 +560,364 @@ output$download_SAG_Data <- downloadHandler(
     suppressWarnings(ICES_plot_7(advice_action_quality(), sagSettings(), query$sagStamp))
   })
 
-#### this function is used to replace N.A. with NA in the assessment component, it's just a placeholder
-# until I fix the ASD package 
-# replace_na_with_na_string <- function(assessment_component) {
-#   if (assessment_component == "NA") {
-#     return("N.A.")
-#   } else {
-#     return(assessment_component)
-#   }
-# }
-# ##### ASD info
-# advice_view_info <- reactive({
-#   browser()
-#   asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-#   if (!is_empty(asd_record)) {
-#     asd_record <- asd_record %>% filter(
-#       adviceViewPublished == TRUE,
-#       adviceStatus == "Advice",
-#       adviceComponent == replace_na_with_na_string(query$assessmentcomponent)
-#     )
-#   }
-# })
-replace_na_with_na_string <- function(assessment_component) {
-  if (is.na(assessment_component) || assessment_component == "NA") {
-    return("N.A.")
-  } else {
-    return(assessment_component)
-  }
-}
 
-advice_view_info <- reactive({
   
-  asd_record <- getAdviceViewRecord(assessmentKey = query$assessmentkey)
-  
-  if (!is_empty(asd_record)) {
-    target_component <- replace_na_with_na_string(query$assessmentcomponent)
-    
-    asd_record <- asd_record %>% filter(
-      adviceViewPublished == TRUE,
-      adviceStatus == "Advice",
-      adviceComponent == target_component | (is.na(adviceComponent) & target_component == "N.A.")
+  advice_view_info <- reactive({
+    req(query$assessmentkey)
+    req(rv$asd)
+    dt <- rv$asd
+    if (is.null(dt) || !nrow(dt)) {
+      return(NULL)
+    }
+
+    out <- dt[AssessmentKey == as.integer(query$assessmentkey)]
+    if (!nrow(out)) {
+      return(NULL)
+    }
+
+    pick_asd_record_for_year(
+      df = out,
+      active_year = input$selected_years,
+      assessment_component = query$assessmentcomponent
     )
-  }
-})
+  })
+
+
+  ##### ASD info previous year
+  advice_view_info_previous_year <- eventReactive(req(query$stockkeylabel, query$year), {
+    filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey, ]
+    # Conditional check if filtered_row is empty
+    if (nrow(filtered_row) == 0) {
+      filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
+    }
+
+    asd_record_previous <- getAdviceViewRecord(query$stockkeylabel, query$year - filtered_row$AssessmentFrequency[1])
+
+    # this is a fix to cover an exeption (like aru.27.123a4) when the assessment frequency is 2 but there is an advice in the previous year.
+    if (is_empty(asd_record_previous)) {
+      asd_record_previous <- try(getAdviceViewRecord(query$stockkeylabel, query$year))
+    }
+
+    if (!is_empty(asd_record_previous)) {
+      asd_record_previous <- asd_record_previous %>% filter(
+        adviceViewPublished == TRUE,
+        adviceStatus == "Advice",
+        adviceComponent == replace_na_with_na_string(query$assessmentcomponent)
+      )
+    }
+  })
 
 
 
-##### ASD info previous year
-advice_view_info_previous_year <- eventReactive(req(query$stockkeylabel, query$year), {
-  
-  filtered_row <- res_mod()[res_mod()$AssessmentKey == query$assessmentkey,]
-  # Conditional check if filtered_row is empty
-  if (nrow(filtered_row) == 0) {
-    filtered_row <- icesSD::getSD(query$stockkeylabel, query$year)
-  }
-  
-  asd_record_previous <- getAdviceViewRecord(query$stockkeylabel, query$year - filtered_row$AssessmentFrequency[1])
+  ##### catch scenarios table
+  catch_scenario_table <- eventReactive(req(advice_view_info()), {
+    standardize_catch_scenario_table(icesASD::get_catch_scenario_table(advice_view_info()$adviceKey, query$year))
+  })
 
-  # this is a fix to cover an exeption (like aru.27.123a4) when the assessment frequency is 2 but there is an advice in the previous year.
-  if (is_empty(asd_record_previous)) {
-    asd_record_previous <- try(getAdviceViewRecord(query$stockkeylabel, query$year))
-  }
+  ##### catch scenarios table previous year in percentages (for radial plot)
+  catch_scenario_table_previous_year <- eventReactive(req(advice_view_info_previous_year()), {
+    standardize_catch_scenario_table(icesASD::get_catch_scenario_table(advice_view_info_previous_year()$adviceKey, query$year))
+  })
 
-  if (!is_empty(asd_record_previous)) {
-    asd_record_previous <- asd_record_previous %>% filter(
-      adviceViewPublished == TRUE,
-      adviceStatus == "Advice",
-      adviceComponent == replace_na_with_na_string(query$assessmentcomponent)
+  ##### catch scenario table scaled with the values of previous advice to get percentage of change
+  catch_scenario_table_percentages <- eventReactive(req(catch_scenario_table_previous_year(), catch_scenario_table()), {
+    validate(
+      need(!is_empty(catch_scenario_table_previous_year()$table), "No catch scenario table in previous assessment year"),
+      need(!is_empty(catch_scenario_table()$table), "No catch scenario table in this assessment year")
     )
-  }
-})
+
+    scale_catch_scenarios_for_radialPlot(catch_scenario_table_previous_year()$table, catch_scenario_table()$table)
+  })
 
 
-
-##### catch scenarios table
-catch_scenario_table <- eventReactive(req(advice_view_info()), {
-  standardize_catch_scenario_table(icesASD::get_catch_scenario_table(advice_view_info()$adviceKey, query$year))
-})
-
-##### catch scenarios table previous year in percentages (for radial plot)
-catch_scenario_table_previous_year <- eventReactive(req(advice_view_info_previous_year()), {
-  standardize_catch_scenario_table(icesASD::get_catch_scenario_table(advice_view_info_previous_year()$adviceKey, query$year))
-  
-})
-
-##### catch scenario table scaled with the values of previous advice to get percentage of change
-catch_scenario_table_percentages <- eventReactive(req(catch_scenario_table_previous_year(),catch_scenario_table()), {
-  validate(
-    need(!is_empty(catch_scenario_table_previous_year()$table), "No catch scenario table in previous assessment year"),
-    need(!is_empty(catch_scenario_table()$table), "No catch scenario table in this assessment year")
-  )
-
-  scale_catch_scenarios_for_radialPlot(catch_scenario_table_previous_year()$table, catch_scenario_table()$table)
-})
-
-
-### F_SSB and chatches plot linked to table
-output$catch_scenario_plot_F_SSB_Catch <- renderPlotly({
-  
-  validate(
+  ### F_SSB and chatches plot linked to table
+  output$catch_scenario_plot_F_SSB_Catch <- renderPlotly({
+    validate(
       need(!is_empty(catch_scenario_table()$table), "Catch scenarios not available for this stock")
     )
 
-  if (str_detect(tail(query$stockkeylabel), "nep")) {
-    catch_scenario_plot_1_nephrops(catch_scenario_table(), SAG_data_reactive(), sagSettings())
-  } else {
-    catch_scenario_plot_1(catch_scenario_table(), SAG_data_reactive(), sagSettings())
-  }
-}) 
+    if (str_detect(tail(query$stockkeylabel), "nep")) {
+      catch_scenario_plot_1_nephrops(catch_scenario_table(), SAG_data_reactive(), sagSettings())
+    } else {
+      catch_scenario_plot_1(catch_scenario_table(), SAG_data_reactive(), sagSettings())
+    }
+  })
 
-########## Historical catches panel (preparation of data)
-test_table <- eventReactive(catch_scenario_table(), {
-  req(query$stockkeylabel, query$year)
-  validate(
-    need(!is_empty(catch_scenario_table()$table), ""),
-    need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
-   
-  )
-  wrangle_catches_with_scenarios(SAG_data_reactive(),query$assessmentkey, catch_scenario_table()$table, advice_view_info_previous_year()$adviceValue,advice_view_info_previous_year()$adviceApplicableUntil, query$year)
-})
-
-########## Historical catches panel (Definition of basis of advice)
-Basis <- eventReactive(catch_scenario_table(),{
-    
-    catch_scenario_table()$table[catch_scenario_table()$table$cS_Purpose == "Basis Of Advice", ]
-
-})
-
-########## Historical catches panel (Selection panel)
-output$catch_scenarios <- renderUI({  
-  
-  if (!is_empty(test_table())) {
-    virtualSelectInput(
-      inputId = "catch_choice",
-      label = "Select one or more catch scenarios:",
-      choices = unique(test_table()$Scenario),
-      selected = c("Historical Catches", "Previous advice", Basis()$Scenario),
-      multiple = TRUE,
-      width = "100%",
-      search = TRUE
+  ########## Historical catches panel (preparation of data)
+  test_table <- eventReactive(catch_scenario_table(), {
+    req(query$stockkeylabel, query$year)
+    validate(
+      need(!is_empty(catch_scenario_table()$table), ""),
+      need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
     )
-  
-  } else {
-    HTML("No data available")
-  }
-})
+    wrangle_catches_with_scenarios(SAG_data_reactive(), query$assessmentkey, catch_scenario_table()$table, advice_view_info_previous_year()$adviceValue, advice_view_info_previous_year()$adviceApplicableUntil, query$year)
+  })
 
-########## Historical catches panel (Plot)
-output$TAC_timeline <- renderPlotly({
-  validate(
-    need(!is_empty(catch_scenario_table()$table), "Catch scenarios not available for this stock")
-  )
-  TAC_timeline(test_table(), input$catch_choice, SAG_data_reactive())
-})
+  ########## Historical catches panel (Definition of basis of advice)
+  Basis <- eventReactive(catch_scenario_table(), {
+    catch_scenario_table()$table[catch_scenario_table()$table$cS_Purpose == "Basis Of Advice", ]
+  })
 
-# Update plot using plotlyProxy when scenarios change
-eventReactive(input$catch_choice, {
-  # Filter data based on selected scenarios
-  filtered_data <- test_table() %>% filter(Scenario %in% input$catch_choice)
+  ########## Historical catches panel (Selection panel)
+  output$catch_scenarios <- renderUI({
+    if (!is_empty(test_table())) {
+      virtualSelectInput(
+        inputId = "catch_choice",
+        label = "Select one or more catch scenarios:",
+        choices = unique(test_table()$Scenario),
+        selected = c("Historical Catches", "Previous advice", Basis()$Scenario),
+        multiple = TRUE,
+        width = "100%",
+        search = TRUE
+      )
+    } else {
+      HTML("No data available")
+    }
+  })
 
-  # Prepare lists for the `restyle` method, specifying color for each scenario
-  x_values <- split(filtered_data$Year, filtered_data$Scenario)
-  y_values <- split(filtered_data$Catches, filtered_data$Scenario)
-  colors <- split(filtered_data$Color, filtered_data$Scenario) %>% lapply(unique)
-  # markers = split(filtered_data$MarkerSize, filtered_data$Scenario) %>% lapply(unique)
+  ########## Historical catches panel (Plot)
+  output$TAC_timeline <- renderPlotly({
+    validate(
+      need(!is_empty(catch_scenario_table()$table), "Catch scenarios not available for this stock")
+    )
+    TAC_timeline(test_table(), input$catch_choice, SAG_data_reactive())
+  })
 
-  plotlyProxy("TAC_timeline", session) %>%
-    plotlyProxyInvoke("restyle", list(
-      x = x_values,
-      y = y_values,
-      # "line.color" = colors # Use colors from the Color column
-      colors = colors
-    ))
-})
+  # Update plot using plotlyProxy when scenarios change
+  eventReactive(input$catch_choice, {
+    # Filter data based on selected scenarios
+    filtered_data <- test_table() %>% filter(Scenario %in% input$catch_choice)
+
+    # Prepare lists for the `restyle` method, specifying color for each scenario
+    x_values <- split(filtered_data$Year, filtered_data$Scenario)
+    y_values <- split(filtered_data$Catches, filtered_data$Scenario)
+    colors <- split(filtered_data$Color, filtered_data$Scenario) %>% lapply(unique)
+    # markers = split(filtered_data$MarkerSize, filtered_data$Scenario) %>% lapply(unique)
+
+    plotlyProxy("TAC_timeline", session) %>%
+      plotlyProxyInvoke("restyle", list(
+        x = x_values,
+        y = y_values,
+        # "line.color" = colors # Use colors from the Color column
+        colors = colors
+      ))
+  })
 
 
-output$download_TAC_Data <- downloadHandler(
+  output$download_TAC_Data <- downloadHandler(
     filename = paste0("adviceXplorer_data-", Sys.Date(), ".zip"),
     content = function(fname) {
       fs <- c("Disclaimer.txt", paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_HistCatches_data.csv"))
       write.csv(test_table(), file = paste0(SAG_data_reactive()$StockKeyLabel[1], "-adviceXplorer_HistCatches_data.csv"))
-      write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"),  file = "Disclaimer.txt", row.names = FALSE)
-      
-      zip::zip(zipfile=fname, files=fs)
+      write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"), file = "Disclaimer.txt", row.names = FALSE)
+
+      zip::zip(zipfile = fname, files = fs)
     },
     contentType = "application/zip"
   )
 
-output$TAC_download <- renderUI({
-  validate(
-    need(!is_empty(catch_scenario_table()$table), "")
-  )
-  HTML(paste0(
-    "<br/>",
-    "<span class='hovertext' data-hover='Catch time series data download'>",
-    downloadLink("download_TAC_Data", HTML("<font size= 3>Download catch time series data <i class='fa-solid fa-cloud-arrow-down'></i></font></span>"))
-  ))
-})
-############ Radial plot panel (Selection panel)
-output$catch_scenarios_radial <- renderUI({
-  if (!is_empty(catch_scenario_table_previous_year()$table)) {
-    virtualSelectInput(
-      inputId = "catch_choice_radial",
-      label = "Select one or more catch scenarios:",
-      choices = unique(catch_scenario_table_percentages()$Scenario),
-      selected = c(Basis()$Scenario),
-      multiple = TRUE,
-      width = "100%",
-      search = TRUE
+  output$TAC_download <- renderUI({
+    validate(
+      need(!is_empty(catch_scenario_table()$table), "")
     )
-  } else {
-    HTML("")
-  }
-})
+    HTML(paste0(
+      "<br/>",
+      "<span class='hovertext' data-hover='Catch time series data download'>",
+      downloadLink("download_TAC_Data", HTML("<font size= 3>Download catch time series data <i class='fa-solid fa-cloud-arrow-down'></i></font></span>"))
+    ))
+  })
+  ############ Radial plot panel (Selection panel)
+  output$catch_scenarios_radial <- renderUI({
+    if (!is_empty(catch_scenario_table_previous_year()$table)) {
+      virtualSelectInput(
+        inputId = "catch_choice_radial",
+        label = "Select one or more catch scenarios:",
+        choices = unique(catch_scenario_table_percentages()$Scenario),
+        selected = c(Basis()$Scenario),
+        multiple = TRUE,
+        width = "100%",
+        search = TRUE
+      )
+    } else {
+      HTML("")
+    }
+  })
 
-############ Radial plot panel (radial plot)
-output$Radial_plot <- renderPlotly({
-  
-  validate(
-    need(!is_empty(advice_view_info()), "No ASD entry in assessment year"),
-    need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
-  )
-  radial_plot(catch_scenario_table_percentages(), input$catch_choice_radial)
-})
+  ############ Radial plot panel (radial plot)
+  output$Radial_plot <- renderPlotly({
+    validate(
+      need(!is_empty(advice_view_info()), "No ASD entry in assessment year"),
+      need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
+    )
+    radial_plot(catch_scenario_table_percentages(), input$catch_choice_radial)
+  })
 
-output$Radial_plot_disclaimer <- renderUI(
-  HTML("<br><br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment. <br/>
+  output$Radial_plot_disclaimer <- renderUI(
+    HTML("<br><br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment. <br/>
   The scale of the plot is relative across the scenarios presented, please refer to the table or the % of change plot for actual percentage of change.")
-)
-############ Lollipop plot panel (Selection panel) 
-output$catch_indicators_lollipop <- renderUI({
-  if (!is_empty(catch_scenario_table_previous_year()$table)) {
-    virtualSelectInput(
-      inputId = "indicator_choice_lollipop",
-      label = "Select one ore more indicators:",
-      choices = catch_scenario_table_percentages() %>%
-        select(where(~ !any(is.na(.)))) %>%
-        names() %>%
-        str_subset(pattern = c("Year|Scenario|cS_Purpose"), negate = TRUE),
-      selected = c("SSB change"),
-      multiple = TRUE,
-      width = "100%",
-      search = TRUE
+  )
+  ############ Lollipop plot panel (Selection panel)
+  output$catch_indicators_lollipop <- renderUI({
+    if (!is_empty(catch_scenario_table_previous_year()$table)) {
+      virtualSelectInput(
+        inputId = "indicator_choice_lollipop",
+        label = "Select one ore more indicators:",
+        choices = catch_scenario_table_percentages() %>%
+          select(where(~ !any(is.na(.)))) %>%
+          names() %>%
+          str_subset(pattern = c("Year|Scenario|cS_Purpose"), negate = TRUE),
+        selected = c("SSB change"),
+        multiple = TRUE,
+        width = "100%",
+        search = TRUE
+      )
+    } else {
+      HTML("")
+    }
+  })
+
+  ############ Lollipop plot panel (Lollipop plot)
+  output$Lollipop_plot <- renderPlotly({
+    validate(
+      need(!is_empty(advice_view_info()), "No ASD entry in assessment year"),
+      need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
     )
-  } else {
-    HTML("")
-  }
-})
+    lollipop_plot(catch_scenario_table_percentages(), input$indicator_choice_lollipop)
+  })
 
-############ Lollipop plot panel (Lollipop plot) 
-output$Lollipop_plot <- renderPlotly({
-  validate(
-    need(!is_empty(advice_view_info()), "No ASD entry in assessment year"),
-    need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
-  )  
-  lollipop_plot(catch_scenario_table_percentages(),input$indicator_choice_lollipop)
-})
-
-output$lollipop_plot_disclaimer <- renderUI(
-  HTML("<br> <br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment.")
-)
+  output$lollipop_plot_disclaimer <- renderUI(
+    HTML("<br> <br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment.")
+  )
 
 
-###### Calendar of stock with modal
-observeEvent(input$preview, {
+  ###### Calendar of stock with modal
+  observeEvent(input$preview, {
     # Show a modal when the button is pressed
-    shinyalert(title= " Advice Calendar", 
-    
-    tags$body(HTML(html_calendar(advice_view_info(), res_mod(), input$rdbtn))),
-            type = "info",
-            html=TRUE,
-            closeOnClickOutside = TRUE,
-            confirmButtonText = "Close",
-            size = "s",
-            )
+    shinyalert(
+      title = " Advice Calendar",
+      tags$body(HTML(html_calendar(advice_view_info(), res_mod(), input$rdbtn))),
+      type = "info",
+      html = TRUE,
+      closeOnClickOutside = TRUE,
+      confirmButtonText = "Close",
+      size = "s",
+    )
   })
 
 
-catch_scenario_table_collated <- eventReactive(catch_scenario_table(),{
-  validate(
+  catch_scenario_table_collated <- eventReactive(catch_scenario_table(), {
+    validate(
       need(!is_empty(catch_scenario_table()$table), "Catch scenarios not available for this stock")
     )
-    
+
     catch_scenario_table()$table %>%
-    arrange(cS_Purpose) %>%
-    rename_all(~ catch_scenario_table()$cols) %>% 
-    rename("Basis" = cS_Label) %>% #, " " = cS_Purpose
-    select_if(~!(all(is.na(.)) | all(. == "")))
-})
-
-
-
-
-output$table <- renderReactable({
-  
-  reactable(catch_scenario_table_collated() %>% select(!(Year)),
-  rowStyle = function(index) {
-    if (catch_scenario_table_collated()[index, "cS_Purpose"] == "Basis Of Advice") list(fontWeight = "bold")
-  },
-    filterable = TRUE,
-    highlight = TRUE,
-    defaultPageSize = 100,
-    striped = TRUE,
-    defaultColDef = colDef(
-      headerStyle = list(background = "#99AABF", borderRight = "1px solid #eee")
-
-    ),
-    columns = list(
-      "cS_Purpose" = colDef(
-        show = FALSE
-      )
-    ),
-    theme = reactableTheme(
-      stripedColor = "#eff2f5",
-      highlightColor = "#f9b99f",
-      cellPadding = "2px 2px"
-    )
-  )
-})
-
-output$download_catch_table <- downloadHandler(
-  filename = paste0("adviceXplorer_data-", Sys.Date(), ".zip"),
-  content = function(fname) {
-    fs <- c("Disclaimer.txt", "adviceXplorer_catchScenario_data.csv", "adviceXplorer_catchScenarioNotes_data.csv")    
-    write.csv(icesASD::get_catch_scenario_table(advice_view_info()$adviceKey, query$year), file = "adviceXplorer_catchScenario_data.csv")
-    write.csv(icesASD::getCatchScenariosNotes(advice_view_info()$adviceKey), file = "adviceXplorer_catchScenarioNotes_data.csv")
-    write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"), file = "Disclaimer.txt", row.names = FALSE)
-
-    zip::zip(zipfile = fname, files = fs)
-  },
-  contentType = "application/zip"
-)
-
-
-##### footnotes of catch scenario table
-footnotes <- eventReactive(req(advice_view_info()), {
-  format_catch_scenario_notes(advice_view_info()$adviceKey)
-})
-output$footnotes <-renderUI({
-  validate(
-      need(!is_empty(footnotes()), " ")
-    )
-  
-  footnotes()
+      arrange(cS_Purpose) %>%
+      rename_all(~ catch_scenario_table()$cols) %>%
+      rename("Basis" = cS_Label) %>% # , " " = cS_Purpose
+      select_if(~ !(all(is.na(.)) | all(. == "")))
   })
 
-# ##### Last page text, citation, data usage, feedback etcc
-# output$contact_feedback <- renderUI({
-#   make_contact_and_feedback()
-  
-# })
-# ##### Last page text, citation, data usage, feedback etcc
-# output$data_sources <- renderUI({
-#   make_data_sources()
-  
-# })
 
-# ##### Last page text, citation, data usage, feedback etcc
-# output$data_disclaimer_policy <- renderUI({
-#   make_data_disclaimer_and_policy()
-  
-# })
 
-# ##### Last page text, citation, data usage, feedback etcc
-# output$citation <- renderUI({
-#   make_citation()
-  
-# })
-mod_resources_server("resources")
 
+  output$table <- renderReactable({
+    reactable(catch_scenario_table_collated() %>% select(!(Year)),
+      rowStyle = function(index) {
+        if (catch_scenario_table_collated()[index, "cS_Purpose"] == "Basis Of Advice") list(fontWeight = "bold")
+      },
+      filterable = TRUE,
+      highlight = TRUE,
+      defaultPageSize = 100,
+      striped = TRUE,
+      defaultColDef = colDef(
+        headerStyle = list(background = "#99AABF", borderRight = "1px solid #eee")
+      ),
+      columns = list(
+        "cS_Purpose" = colDef(
+          show = FALSE
+        )
+      ),
+      theme = reactableTheme(
+        stripedColor = "#eff2f5",
+        highlightColor = "#f9b99f",
+        cellPadding = "2px 2px"
+      )
+    )
+  })
+
+  output$download_catch_table <- downloadHandler(
+    filename = paste0(query$stockkeylabel, "-adviceXplorer_data-", Sys.Date(), ".zip"),
+    content = function(fname) {
+      fs <- c("Disclaimer.txt", "adviceXplorer_catchScenario_data.csv", "adviceXplorer_catchScenarioNotes_data.csv")
+      write.csv(icesASD::get_catch_scenario_table(advice_view_info()$adviceKey, query$year), file = "adviceXplorer_catchScenario_data.csv")
+      write.csv(icesASD::getCatchScenariosNotes(advice_view_info()$adviceKey), file = "adviceXplorer_catchScenarioNotes_data.csv")
+      write.table(read.delim("https://raw.githubusercontent.com/ices-tools-prod/disclaimers/master/Disclaimer_adviceXplorer.txt"), file = "Disclaimer.txt", row.names = FALSE)
+
+      zip::zip(zipfile = fname, files = fs)
+    },
+    contentType = "application/zip"
+  )
+
+
+  ##### footnotes of catch scenario table
+  footnotes <- eventReactive(req(advice_view_info()), {
+    format_catch_scenario_notes(advice_view_info()$adviceKey)
+  })
+  output$footnotes <- renderUI({
+    validate(
+      need(!is_empty(footnotes()), " ")
+    )
+
+    footnotes()
+  })
+
+
+  mod_resources_server("resources")
+  share_url <- reactiveVal("")
+
+  observeEvent(input$share_btn, {
+    ak <- query$assessmentkey %||% ""
+    ac <- query$assessmentcomponent %||% "NA"
+    tab <- input$tabset %||% ""
+
+    # If no stock selected yet, you can still share the app root (optional)
+    final <- if (nzchar(ak)) {
+      paste0(.base_url(session), make_url_search(ak, ac, tab))
+    } else {
+      paste0(.base_url(session), make_url_search(NULL, NULL, tab))
+    }
+
+    share_url(final)
+
+    showModal(modalDialog(
+      title = "Share this view",
+      easyClose = TRUE,
+      footer = tagList(
+        modalButton("Close"),
+        actionButton("copy_share_link", "Copy link", icon = icon("copy"), class = "btn btn-primary btn-sm")
+      ),
+      tags$p("This link reproduces this exact view:"),
+      tags$div(
+        style = "word-break: break-all; padding: 6px; border: 1px solid #ddd; border-radius: 4px;",
+        final
+      ),
+      tags$div(
+        style = "margin-top: 8px;",
+        tags$a(href = final, target = "_blank", rel = "noopener", "Open in new tab")
+      ),
+      size = "m"
+    ))
+  })
+
+  observeEvent(input$copy_share_link, {
+    session$sendCustomMessage("copyText", list(text = share_url()))
+  })
+
+  observeEvent(input$share_copy_success, {
+    showNotification("Link copied to clipboard", type = "message")
+  })
+
+  observeEvent(input$share_copy_error, {
+    showNotification(paste("Copy failed:", input$share_copy_error), type = "error")
+  })
 }
