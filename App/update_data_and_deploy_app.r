@@ -1,6 +1,6 @@
 #### This code will update both SAG and SID data at regular time intervals and re-deploy the app at the end
 
-# Libraries required for the code are loaded
+# Load libraries listed in ui.R
 
 library(rsconnect)
 
@@ -9,6 +9,7 @@ library(rsconnect)
 setwd("./App")
 
 ## Once a year, please update SID_cache using
+# source("utilities_SID_data.R")
 # source("Update_SID_cache.R")
 
 source("deploy.r")
