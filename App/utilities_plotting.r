@@ -326,18 +326,21 @@ theme_ICES_plots <-
                                             "#00b29d", 
                                             "#6eb200", 
                                             "#6eb5d2", 
-                                            "#eb5c24")),
+                                            "#eb5c24",
+                                            "#fd0000")),
             scale_linetype_manual(values = c("solid", 
                                             "dashed", 
                                             "dotted", 
                                             "dotdash", 
                                             "longdash", 
-                                            "twodash")),
+                                            "dotted",
+                                            "solid")),
             scale_size_manual(values = c(1, 
                                         .8, 
                                         .8, 
+                                        .8,
                                         .8, 
-                                        .8, 
+                                        .8,
                                         .8))
             # scale_fill_manual(values = scales::hue_pal()(length(unique(selected_data$type))))
             # limits
@@ -966,7 +969,7 @@ ICES_plot_3 <- function(df, sagSettings, sagStamp) {
                 data = df_segments %>% filter(!is.na(Low_FishingPressure) & !is.na(High_FishingPressure)), aes(
                     ymin = Low_FishingPressure,
                     ymax = High_FishingPressure,
-                    fill = ConfidenceIntervalDefinition,
+                    fill = as.character(ConfidenceIntervalDefinition),
                     group = segment,
                     text = map(
                         paste0(
@@ -1066,7 +1069,7 @@ ICES_plot_3 <- function(df, sagSettings, sagStamp) {
     }
 
 
-    if (any(!is.na(df_segments$HRMGT)) && length(processed$customRefPoint) != 0 && processed$customRefPoint == "HRMGT") {
+    if (any(!is.na(df_segments$HRMGT)) && length(processed$customRefPoint) != 0 && any(processed$customRefPoint == "HRMGT")) {
         p3 <- p3 +
             geom_line(aes(
                 x = Year,
@@ -1772,7 +1775,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
         scaling_factor_catches <- get_scaling_factor("CatchesLandingsUnits", df$CatchesLandingsUnits[1])        
         
         
-        scaling <- get_scaling(as.numeric(c(df$Catches, df$Landings, df$Discards)), scaling_factor_catches, type = "catches")
+        scaling <- get_scaling(as.numeric(c(df$Catches, df$Landings, df$Discards, selected_data$count)), scaling_factor_catches, type = "catches")
         divisor <- scaling$divisor
         suffix <- scaling$suffix
 

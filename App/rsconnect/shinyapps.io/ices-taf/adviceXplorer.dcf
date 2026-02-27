@@ -5,5 +5,5 @@ account: ices-taf
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 9377865
-bundleId: 11633381
+bundleId: 11635931
 url: https://ices-taf.shinyapps.io/advicexplorer/
