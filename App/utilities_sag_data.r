@@ -490,6 +490,7 @@ get_scaling_factor <- function(unit_type, unit_value) {
                            "Kilograms per day" = 1,
                            "Kilograms per gillnet station" = 1,
                            "kg/hr" = 1,
+                           "1000 Kilograms per trip" = 1,
                            "Numbers per hour (fisheries)" = 1,
                            "UWTV abundance (billions)" = 1000000000,
                            "Number of individuals (billions)" = 1000000000,
