@@ -12,5 +12,5 @@ setwd("./App")
 # source("utilities_SID_data.R")
 # source("Update_SID_cache.R")
 
-source("deploy.r")
+source("deploy.R")
 

@@ -3357,3 +3357,17 @@ sagList <- jsonlite::fromJSON(
 
 icesSAG::getSAGSettingsForAStock(20911)
 icesSAG
+
+y <- c(2026:2020)
+sagStocks <- icesSAG::getListStocks(year = y)
+dim(sagStocks)
+names(sagStocks)
+
+unique(sagStocks$AssessmentYear)
+
+
+sagData <- icesSAG::getStockDownloadData(sagStocks$AssessmentKey)
+names(sagData)
+
+listRefPoints <- unique(c(sagData$CustomRefPointName1, sagData$CustomRefPointName2, sagData$CustomRefPointName3, sagData$CustomRefPointName4, sagData$CustomRefPointName5))
+write.table(listRefPoints, "D:/GitHub_2023/online-advice/listRefPoints.csv", row.names = FALSE, col.names = FALSE, sep = ",")
