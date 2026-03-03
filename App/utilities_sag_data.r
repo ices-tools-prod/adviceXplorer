@@ -486,6 +486,7 @@ get_scaling_factor <- function(unit_type, unit_value) {
                            "Kilograms per trip" = 1,
                            "Kilograms per trap" = 1,
                            "Kilograms per hook" = 1,
+                           "Kilograms per haul" = 1,
                            "Kilograms per 1000 hooks" = 1,
                            "Kilograms per day" = 1,
                            "Kilograms per gillnet station" = 1,

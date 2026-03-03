@@ -1485,14 +1485,15 @@ ICES_plot_4 <- function(df, sagSettings, sagStamp) {
       show.legend = FALSE
     )
   }
-
+browser()
   # Averages (unchanged but use Metric)
   averageYears <- processed$sagSettings4 %>%
-    dplyr::filter(settingKey == 46) %>%
-    dplyr::pull(settingValue) %>%
-    stringr::str_split(",", simplify = TRUE) %>%
-    as.numeric()
-
+      dplyr::filter(settingKey == 46) %>%
+      dplyr::pull(settingValue) %>%
+      stringr::str_split(",", simplify = TRUE) %>%
+      stringr::str_split("[,/]", simplify = TRUE) %>%
+      as.numeric()
+      
   if (length(averageYears)) {
     id1 <- nrow(df_segments) - 1:averageYears[1] + 1
     id2 <- nrow(df_segments) - 1:averageYears[2] - averageYears[1] + 1
@@ -1894,8 +1895,8 @@ ICES_plot_4 <- function(df, sagSettings, sagStamp) {
 ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
 
   sagSettingsCustom <- sagSettings %>% dplyr::filter(SAGChartKey == ChartKey)
-
-  # Helpers
+    
+  # ---------------- helpers ----------------
   split_csv <- function(x) {
     if (length(x) == 0 || is.na(x) || !nzchar(x)) return(character(0))
     trimws(unlist(strsplit(x, ",", fixed = TRUE)))
@@ -1920,7 +1921,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
     col
   }
 
-  # Recompute segment logic after filtering (prevents y-scale trained on full series)
+  # segment logic after filtering to x-window
   add_segments <- function(wide_df) {
     if (!("Series1" %in% names(wide_df))) wide_df$Series1 <- NA_real_
     wide_df %>%
@@ -1933,16 +1934,72 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       tidyr::drop_na(Year)
   }
 
-  # Axis settings (only these two)
-  # 2 = min X, 4 = min Y
+  # compute finite y-limits from visible data (plus ref points if present)
+  compute_y_limits <- function(graphType, selected_data_zoom, selected_data_wide_zoom,
+                               ref_points_zoom, y_min_user) {
+
+    y_vals <- numeric(0)
+
+    if (graphType %in% c(1, 2)) {
+      y_vals <- c(
+        y_vals,
+        as.numeric(selected_data_wide_zoom$Series1),
+        as.numeric(selected_data_wide_zoom$Series2),
+        as.numeric(selected_data_wide_zoom$Series3)
+      )
+    } else if (graphType %in% c(3, 4)) {
+      totals <- selected_data_zoom %>%
+      dplyr::filter(is.finite(count)) %>%
+      dplyr::group_by(Year) %>%
+      dplyr::summarise(total = sum(count, na.rm = TRUE), .groups = "drop")
+
+    y_max_auto <- if (nrow(totals)) max(totals$total, na.rm = TRUE) else NA_real_
+    y_min_auto <- 0
+
+    ymin <- if (is.finite(y_min_user)) y_min_user else y_min_auto
+    ymax <- if (is.finite(y_max_auto)) y_max_auto * 1.08 else NA_real_  # a bit more headroom
+
+    if (is.finite(ymin) && is.finite(ymax) && ymin >= ymax) {
+      ymax <- ymin + 1
+    }
+    return(list(ymin = ymin, ymax = ymax))
+    }
+
+    if (!missing(ref_points_zoom) && !is.null(ref_points_zoom) && nrow(ref_points_zoom) > 0) {
+      rp_val_cols <- grep("^CustomRefPointValue\\d+$", names(ref_points_zoom), value = TRUE)
+      if (length(rp_val_cols)) {
+        y_vals <- c(y_vals, unlist(lapply(rp_val_cols, function(cc) as.numeric(ref_points_zoom[[cc]]))))
+      }
+    }
+
+    y_vals <- y_vals[is.finite(y_vals)]
+    if (!length(y_vals)) {
+      return(list(ymin = if (is.finite(y_min_user)) y_min_user else NA_real_, ymax = NA_real_))
+    }
+
+    y_max_auto <- max(y_vals, na.rm = TRUE)
+    y_min_auto <- min(y_vals, na.rm = TRUE)
+
+    ymin <- if (is.finite(y_min_user)) y_min_user else y_min_auto
+    ymax <- y_max_auto * 1.05
+
+    if (is.finite(ymin) && is.finite(ymax) && ymin >= ymax) {
+      ymax <- ymin * 1.05
+      if (!is.finite(ymax) || ymax == ymin) ymax <- ymin + 1
+    }
+
+    list(ymin = ymin, ymax = ymax)
+  }
+
+  # ---------------- read settings ----------------
+  # axis mins: 2 = min X, 4 = min Y
   x_min_user <- get_setting_num(sagSettingsCustom, 2)
   y_min_user <- get_setting_num(sagSettingsCustom, 4)
 
-  # Series selectors (settingKey 44): integers => Custom{n}, names => existing columns
+  # series selector: settingKey 44
   series_tokens <- sagSettingsCustom %>%
     dplyr::filter(settingKey == 44) %>%
     dplyr::pull(settingValue)
-
   series_tokens <- if (length(series_tokens) == 0) NA_character_ else series_tokens[1]
   series_tokens <- split_csv(series_tokens)
 
@@ -1958,7 +2015,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
     stop("No custom series resolved from settingKey 44 (neither Custom{n} nor named columns exist).")
   }
 
-  # Reference points (optional) + graph type
+  # reference points (settingKey 51) + graphType (settingKey 50)
   customRefPoint <- sagSettingsCustom %>%
     dplyr::filter(settingKey == 51) %>%
     dplyr::pull(settingValue)
@@ -1980,7 +2037,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
     paste0("^CustomRefPointName(", paste(customRefPoint[!is.na(customRefPoint)], collapse = "|"), ")$")
   } else "^$"
 
-  # Build selected_data: wide -> label -> long
+  # ---------------- build selected series (wide -> long) ----------------
   selected_wide <- df %>%
     dplyr::arrange(Year) %>%
     dplyr::select(Year, dplyr::any_of(value_cols)) %>%
@@ -2000,7 +2057,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
     values_to = "count"
   )
 
-  # Reference points data (optional)
+  # ---------------- ref points (optional) ----------------
   ref_points <- df %>%
     dplyr::select(Year, dplyr::matches(patternValuesRefPoint), dplyr::matches(patternNamesRefPoint)) %>%
     dplyr::mutate(Year = as.numeric(Year))
@@ -2014,7 +2071,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       dplyr::mutate(dplyr::across(dplyr::matches(patternValuesRefPoint), as.numeric))
   }
 
-  # Wide format for line/ribbon logic
+  # wide format for line/ribbon logic
   num_series <- dplyr::n_distinct(selected_data$type)
 
   selected_data_wide <- tidyr::pivot_wider(
@@ -2025,22 +2082,24 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
 
   original_series_names <- setdiff(names(selected_data_wide), "Year")
 
-  if (length(original_series_names) >= 1) names(selected_data_wide)[names(selected_data_wide) == original_series_names[1]] <- "Series1"
-  if (length(original_series_names) >= 2) names(selected_data_wide)[names(selected_data_wide) == original_series_names[2]] <- "Series2"
-  if (length(original_series_names) >= 3) names(selected_data_wide)[names(selected_data_wide) == original_series_names[3]] <- "Series3"
+  if (length(original_series_names) >= 1)
+    names(selected_data_wide)[names(selected_data_wide) == original_series_names[1]] <- "Series1"
+  if (length(original_series_names) >= 2)
+    names(selected_data_wide)[names(selected_data_wide) == original_series_names[2]] <- "Series2"
+  if (length(original_series_names) >= 3)
+    names(selected_data_wide)[names(selected_data_wide) == original_series_names[3]] <- "Series3"
 
   if (!("Series1" %in% names(selected_data_wide))) selected_data_wide$Series1 <- NA_real_
   if (!("Series2" %in% names(selected_data_wide))) selected_data_wide$Series2 <- NA_real_
   if (!("Series3" %in% names(selected_data_wide))) selected_data_wide$Series3 <- NA_real_
 
-  # Determine x-limits (data-driven, then override by user min X if provided)
+  # ---------------- x-window ----------------
   x_min <- suppressWarnings(min(selected_data$Year[!is.na(selected_data$count)], na.rm = TRUE))
   x_max <- suppressWarnings(max(selected_data$Year, na.rm = TRUE))
   if (!is.finite(x_min)) x_min <- suppressWarnings(min(selected_data$Year, na.rm = TRUE))
   if (!is.finite(x_max)) x_max <- suppressWarnings(max(selected_data$Year, na.rm = TRUE))
   if (is.finite(x_min_user)) x_min <- x_min_user
 
-  # --- KEY EDIT: filter data to the x-window so y-scale is trained only on visible data ---
   x_window <- c(x_min, x_max)
 
   selected_data_zoom <- selected_data %>%
@@ -2053,7 +2112,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
   ref_points_zoom <- ref_points %>%
     dplyr::filter(Year >= x_window[1], Year <= x_window[2])
 
-  # Also keep a windowed df for scaling when you include Catches/Landings/Discards in scaling vectors
+  # windowed df for scaling additions in bar charts
   df_window <- df
   if ("Year" %in% names(df_window)) {
     df_window <- df_window %>%
@@ -2061,21 +2120,18 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       dplyr::filter(Year >= x_window[1], Year <= x_window[2])
   }
 
-  # Initialize plot + graphType logic (use zoomed data)
+  # ---------------- base plot ----------------
   pCustom <- ggplot2::ggplot(selected_data_wide_zoom, ggplot2::aes(x = Year))
 
+  # ---------------- graph types ----------------
   if (graphType == 1) {
+
     s1_name <- if (length(original_series_names) >= 1) original_series_names[1] else "Series1"
 
-    # Optional scaling (compute from zoomed values so labels match zoom window)
     if (!("StockSizeUnits" %in% names(df)) || is.na(df$StockSizeUnits[1])) df$StockSizeUnits <- "empty"
     scaling_factor_stockSize <- get_scaling_factor("StockSizeUnits", df$StockSizeUnits[1])
 
-    scaling <- get_scaling(
-      as.numeric(selected_data_wide_zoom$Series1),
-      scaling_factor_stockSize,
-      type = "ssb"
-    )
+    scaling <- get_scaling(as.numeric(selected_data_wide_zoom$Series1), scaling_factor_stockSize, type = "ssb")
     divisor <- scaling$divisor
 
     pCustom <- pCustom +
@@ -2084,11 +2140,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
         color = s1_name,
         group = segment,
         text = purrr::map(
-          paste0(
-            "<b>Year: </b>", Year,
-            "<br>",
-            "<b>", s1_name, ": </b>", Series1
-          ),
+          paste0("<b>Year: </b>", Year, "<br>", "<b>", s1_name, ": </b>", Series1),
           htmltools::HTML
         )
       )) +
@@ -2104,6 +2156,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
     s3_name <- if (length(original_series_names) >= 3) original_series_names[3] else "Series3"
 
     if (num_series == 1) {
+
       pCustom <- pCustom +
         ggplot2::geom_line(ggplot2::aes(
           y = Series1,
@@ -2116,6 +2169,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
         ))
 
     } else if (num_series == 2) {
+
       pCustom <- pCustom +
         ggplot2::geom_line(ggplot2::aes(
           y = Series1,
@@ -2137,6 +2191,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
         ))
 
     } else if (num_series >= 3) {
+
       pCustom <- pCustom +
         ggplot2::geom_ribbon(
           ggplot2::aes(
@@ -2147,10 +2202,8 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
             text = purrr::map(
               paste0(
                 "<b>Year: </b>", Year,
-                "<br>",
-                "<b>High ", s3_name, ": </b>", Series3,
-                "<br>",
-                "<b>Low ", s2_name, ": </b>", Series2
+                "<br>", "<b>High ", s3_name, ": </b>", Series3,
+                "<br>", "<b>Low ", s2_name, ": </b>", Series2
               ),
               htmltools::HTML
             )
@@ -2168,22 +2221,24 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
         ))
     }
 
+    # IMPORTANT: explicit y scale (plotly otherwise can drop ticks)
+    pCustom <- pCustom +
+      ggplot2::scale_y_continuous(
+        expand = ggplot2::expansion(mult = c(0, 0.1)),
+        breaks = scales::pretty_breaks()
+      )
+
   } else if (graphType == 3 || graphType == 4) {
 
     if (!("CatchesLandingsUnits" %in% names(df)) || is.na(df$CatchesLandingsUnits[1])) df$CatchesLandingsUnits <- "empty"
     scaling_factor_catches <- get_scaling_factor("CatchesLandingsUnits", df$CatchesLandingsUnits[1])
 
-    # compute scaling from windowed values
     scale_vec <- as.numeric(selected_data_zoom$count)
-    if ("Catches"   %in% names(df_window)) scale_vec <- c(scale_vec, as.numeric(df_window$Catches))
-    if ("Landings"  %in% names(df_window)) scale_vec <- c(scale_vec, as.numeric(df_window$Landings))
-    if ("Discards"  %in% names(df_window)) scale_vec <- c(scale_vec, as.numeric(df_window$Discards))
+    if ("Catches"  %in% names(df_window)) scale_vec <- c(scale_vec, as.numeric(df_window$Catches))
+    if ("Landings" %in% names(df_window)) scale_vec <- c(scale_vec, as.numeric(df_window$Landings))
+    if ("Discards" %in% names(df_window)) scale_vec <- c(scale_vec, as.numeric(df_window$Discards))
 
-    scaling <- get_scaling(
-      scale_vec,
-      scaling_factor_catches,
-      type = "catches"
-    )
+    scaling <- get_scaling(scale_vec, scaling_factor_catches, type = "catches")
     divisor <- scaling$divisor
 
     pCustom <- ggplot2::ggplot(selected_data_zoom, ggplot2::aes(
@@ -2204,7 +2259,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       )
   }
 
-  # Add first custom reference point (if present) - use filtered ref_points_zoom
+  # ---------------- add first ref point (if present) ----------------
   if (length(customRefPoint) >= 1 && !is.na(customRefPoint[1])) {
     rp_idx <- customRefPoint[1]
     rp_val_col  <- paste0("CustomRefPointValue", rp_idx)
@@ -2234,9 +2289,17 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
     }
   }
 
-  # Axis limits: xlim always; only a lower y bound (no y-max)
+  # ---------------- axis limits (finite y range for plotly) ----------------
+  ylims <- compute_y_limits(
+    graphType = graphType,
+    selected_data_zoom = selected_data_zoom,
+    selected_data_wide_zoom = selected_data_wide_zoom,
+    ref_points_zoom = ref_points_zoom,
+    y_min_user = y_min_user
+  )
+
   coord_x <- c(x_min, x_max)
-  coord_y <- if (is.finite(y_min_user)) c(y_min_user, Inf) else NULL
+  coord_y <- if (is.finite(ylims$ymin) && is.finite(ylims$ymax)) c(ylims$ymin, ylims$ymax) else NULL
 
   pCustom <- pCustom +
     ggplot2::coord_cartesian(
@@ -2244,7 +2307,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       ylim = coord_y
     )
 
-  # Theme: pass ymin into Custom1 branch; do NOT pass ymax
+  # ---------------- theme ----------------
   pCustom <- pCustom +
     theme_ICES_plots(
       type = "Custom1",
@@ -2261,7 +2324,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       ymin = if (is.finite(y_min_user)) y_min_user else NULL
     )
 
-  # Convert to plotly
+  # ---------------- plotly ----------------
   figC2 <- plotly::ggplotly(pCustom, tooltip = "text") %>%
     plotly::layout(
       autosize = TRUE,
@@ -2286,7 +2349,7 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
       )
     )
 
-  # Clean legend names
+  # clean legend names
   for (i in seq_along(figC2$x$data)) {
     nm <- figC2$x$data[[i]]$name
     if (!is.null(nm)) {
@@ -2299,7 +2362,6 @@ ICES_custom_plot <- function(df, sagSettings, ChartKey, sagStamp) {
 
   figC2
 }
-
 #' Function to plot spawning stock biomass (StockSize) for the last 5 years (quality of assessement section)
 #'
 #' @param df (quality of assessement SAG data)
