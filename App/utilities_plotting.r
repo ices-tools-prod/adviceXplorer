@@ -1485,7 +1485,7 @@ ICES_plot_4 <- function(df, sagSettings, sagStamp) {
       show.legend = FALSE
     )
   }
-browser()
+
   # Averages (unchanged but use Metric)
   averageYears <- processed$sagSettings4 %>%
       dplyr::filter(settingKey == 46) %>%
