@@ -295,12 +295,12 @@ parse_location_from_stock_description <- function(stock_description) {
 #' @references
 #'
 
-match_stockcode_to_illustration <- function(StockKeyLabel, df) {
-  sapply(StockKeyLabel, function(key) {
-    temp <- list.files("App/www", pattern = substr(key, 1, 3))
-    if (length(temp) == 0) "fish.png" else temp[1]
-  })
-}
+# match_stockcode_to_illustration <- function(StockKeyLabel, df) {
+#   sapply(StockKeyLabel, function(key) {
+#     temp <- list.files("./App/www", pattern = substr(key, 1, 3))
+#     if (length(temp) == 0) "fish.png" else temp[1]
+#   })
+# }
 
 match_stockcode_to_illustration_offline <- function(stock_codes,
                                                     disk_www_dir = "App/www",

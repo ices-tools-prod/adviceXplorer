@@ -1,11 +1,15 @@
+library(dplyr)
+library(data.table)
+library(tidyr)
+source("App/utilities_SID_data.R")
 ## To be run on your local machine to build the SID cache, which is then committed
 # to the repo and deployed with the app. 
 #This is a one-time operation, and you can re-run it if you want 
 #to update the cache with new data in the future.
 
 # Choose a cache dir inside your repo so it gets deployed with the app
-SID_CACHE_DIR <- "./Data/SID_cache"
-SID_EXCLUSIONS_PATH <- "./Data/SID_exclusions.csv"
+SID_CACHE_DIR <- "App/Data/SID_cache"
+SID_EXCLUSIONS_PATH <- "App/Data/SID_exclusions.csv"
 
 sid_cache_dir <- function(dir = SID_CACHE_DIR) {
   if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
@@ -51,7 +55,7 @@ build_SID_table <- function(year) {
 
   sid[, icon := sprintf(
   '<img src="%s" height="40">',
-  match_stockcode_to_illustration_offline(StockKeyLabel, disk_www_dir = "./www", web_prefix = "")
+  match_stockcode_to_illustration_offline(StockKeyLabel, disk_www_dir = "App/www", web_prefix = "")
 )]
   # Location (also stored in cache)
   sid[, stock_location := parse_location_from_stock_description(StockKeyDescription)]

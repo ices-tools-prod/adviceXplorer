@@ -6,11 +6,11 @@ library(rsconnect)
 
 
 
-setwd("./App")
+# setwd("./App")
 
 ## Once a year, please update SID_cache using
-# source("utilities_SID_data.R")
-# source("Update_SID_cache.R")
+source("./App/utilities_SID_data.R")
+source("./App/Update_SID_cache.R")
 
 source("deploy.R")
 
