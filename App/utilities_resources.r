@@ -362,7 +362,7 @@ build_app_citation <- function(
     authors = c("ICES"),
     year = format(Sys.Date(), "%Y"),
     app_url = "https://ices-taf.shinyapps.io/adviceXplorer/",
-    repo_url = "https://github.com/ices-tools-dev/adviceXplorer",
+    repo_url = "https://github.com/ices-tools-prod/adviceXplorer",
     version = Sys.getenv("APP_VERSION", unset = NA),
     commit = Sys.getenv("APP_COMMIT", unset = NA),
     license = "CC BY 4.0",
@@ -414,7 +414,7 @@ mod_resources_ui <- function(id) {
   ns <- shiny::NS(id)
 
   # adviceXplorer repo + citation
-  repo_url <- "https://github.com/ices-tools-dev/adviceXplorer"
+  repo_url <- "https://github.com/ices-tools-prod/adviceXplorer"
   app_cite <- build_app_citation()
 
   bslib::navset_tab(

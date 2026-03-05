@@ -1,0 +1,46 @@
+name: Deploy adviceXplorer (shinyapps.io)
+
+on:
+  push:
+    branches:
+      - development
+      - release
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Map branch -> GitHub Environment (dev/prod)
+    environment: ${{ github.ref_name == 'release' && 'prod' || 'dev' }}
+
+    env:
+      CI: "true"
+      SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
+      SHINYAPPS_TOKEN:   ${{ secrets.SHINYAPPS_TOKEN }}
+      SHINYAPPS_SECRET:  ${{ secrets.SHINYAPPS_SECRET }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
+
+      - name: Install R packages needed for deployment
+        run: |
+          Rscript -e 'options(repos = c(ICES="https://ices-tools-prod.r-universe.dev", CRAN="https://cloud.r-project.org"))'
+          Rscript -e 'install.packages(c("rsconnect","renv"), dependencies=TRUE)'
+
+      - name: Install app dependencies (no renv.lock)
+        run: |
+          Rscript -e 'options(repos = c(ICES="https://ices-tools-prod.r-universe.dev", CRAN="https://cloud.r-project.org"))'
+          Rscript -e 'deps <- renv::dependencies("App"); pkgs <- sort(unique(deps$Package)); pkgs <- setdiff(pkgs, c("base","compiler","stats","utils","grDevices","graphics","methods")); install.packages(pkgs, dependencies=TRUE)'
+
+      - name: Deploy
+        run: |
+          Rscript scripts/deploy_shinyapps.R
