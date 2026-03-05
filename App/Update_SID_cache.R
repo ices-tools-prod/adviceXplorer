@@ -99,7 +99,7 @@ save_SID_cache_many <- function(years, dir = SID_CACHE_DIR, force = FALSE) {
 }
 
 # rebuild only the affected years
-save_SID_cache_many(2018:2026, force = TRUE)
+# save_SID_cache_many(2018:2026, force = TRUE)
 
 # or a single year if you prefer
 # save_SID_cache(2026, force = TRUE)
