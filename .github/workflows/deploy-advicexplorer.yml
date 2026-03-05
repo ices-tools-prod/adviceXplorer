@@ -10,7 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # Map branch -> GitHub Environment (dev/prod)
+    # Map branch → GitHub environment
     environment: ${{ github.ref_name == 'release' && 'prod' || 'dev' }}
 
     env:
@@ -20,7 +20,7 @@ jobs:
       SHINYAPPS_SECRET:  ${{ secrets.SHINYAPPS_SECRET }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup R
@@ -31,16 +31,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
 
-      - name: Install R packages needed for deployment
-        run: |
-          Rscript -e 'options(repos = c(ICES="https://ices-tools-prod.r-universe.dev", CRAN="https://cloud.r-project.org"))'
-          Rscript -e 'install.packages(c("rsconnect","renv"), dependencies=TRUE)'
+      - name: Restore renv environment
+        uses: r-lib/actions/setup-renv@v2
 
-      - name: Install app dependencies (no renv.lock)
-        run: |
-          Rscript -e 'options(repos = c(ICES="https://ices-tools-prod.r-universe.dev", CRAN="https://cloud.r-project.org"))'
-          Rscript -e 'deps <- renv::dependencies("App"); pkgs <- sort(unique(deps$Package)); pkgs <- setdiff(pkgs, c("base","compiler","stats","utils","grDevices","graphics","methods")); install.packages(pkgs, dependencies=TRUE)'
-
-      - name: Deploy
+      - name: Deploy adviceXplorer
         run: |
           Rscript scripts/deploy_shinyapps.R
