@@ -64,3 +64,5 @@ vignettes/*.pdf
 /dev/worksheet.R
 
 /hangman/
+
+renv/library/
