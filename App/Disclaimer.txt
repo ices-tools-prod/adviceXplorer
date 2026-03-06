@@ -15,7 +15,7 @@
 " "
 " "
 "3. DATA SPECIFIC INFORMATION "
-"This dataset contains the fishing opportunity advice for fish stocks assessed by ICES. The official publications of it can be found here:  "
+"This application contains the fishing opportunity advice for fish stocks assessed by ICES. The official publications of it can be found here:  "
 "https://www.ices.dk/advice/Pages/Latest-Advice.aspx  "
 "The published pdfs of advice are the official advice. Though the app and the databases used have been quality controlled, there may be small errors or differences between the published advice and the data in the adviceXplorer. If any differences are noticed, please e-mail accessions@ices.dk or luca.lamoni@ices.dk so that corrections can be made. "
 "Each advice displayed in the adviceXplorer is linked to an assessment that can be viewed also in the ICES Stock Assessment Graph database and in the Advice and Scenarios database: assessments (key stock and fishery metrics), biological and fishery reference points and settings for the figures and tables (including items such as ‘Absolute/Relative’ basis for the assessment results) as presented in the recurrent ICES advice on fishing opportunities for fish stocks in the Northeast Atlantic. "
