@@ -189,10 +189,6 @@ get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComp
         paste0(
           "<font size=", 3, ">", "Location: ", "<b>", parse_location_from_stock_description(description), "</b><br/>",
           "<font size=", 3, ">", "Status: ", "<b>", fx_link, "</b><br/>"
-          #  "<span class='hovertext' data-hover='Go to fisheriesXplorer for stock status information'>",
-          # fx_link,
-          # "<i class='fa-solid fa-up-right-from-square'></i></span>"
-         
         )
       }
     )
