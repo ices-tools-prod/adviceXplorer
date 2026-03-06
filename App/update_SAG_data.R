@@ -279,6 +279,16 @@ standardiseRefPoints <- function(totrefpoints) {
   }
 
   if (any(totrefpoints %in% c(
+    "HR_{lim}"
+    
+  ))) {
+    totrefpoints[totrefpoints %in% c(
+      "HR_{lim}"
+    
+    )] <- "HR<sub>Lim</sub>"
+  }
+
+  if (any(totrefpoints %in% c(
     "I_{loss}",
     "Iloss"
   ))) {
