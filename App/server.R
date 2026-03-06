@@ -356,7 +356,7 @@ server <- function(input, output, session) {
   ################################ SAG data and plots ############################################################
   SAG_data_reactive <- reactive({
     info <- getStockInfoFromSAG(query$assessmentkey)
-
+    
     query$stockkeylabel <- info$StockKeyLabel
     query$year <- info$AssessmentYear
     query$sagStamp <- info$SAGStamp
@@ -471,7 +471,8 @@ server <- function(input, output, session) {
   })
 
   output$customPlot1 <- renderPlotly({
-    if (nrow(sagSettings() %>% filter(SAGChartKey == 15)) >= 1) {
+    if (nrow(sagSettings() %>% filter(SAGChartKey == 15)) > 1) {
+      
       suppressWarnings(ICES_custom_plot(SAG_data_reactive(), sagSettings(), ChartKey = 15, query$sagStamp))
     } else {
       return(NULL)
@@ -479,7 +480,7 @@ server <- function(input, output, session) {
   })
 
   output$customPlot2 <- renderPlotly({
-    if (nrow(sagSettings() %>% filter(SAGChartKey == 16)) >= 1) {
+    if (nrow(sagSettings() %>% filter(SAGChartKey == 16)) > 1) {
       suppressWarnings(ICES_custom_plot(SAG_data_reactive(), sagSettings(), ChartKey = 16, query$sagStamp))
     } else {
       return(NULL)
@@ -487,7 +488,7 @@ server <- function(input, output, session) {
   })
 
   output$customPlot3 <- renderPlotly({
-    if (nrow(sagSettings() %>% filter(SAGChartKey == 17)) >= 1) {
+    if (nrow(sagSettings() %>% filter(SAGChartKey == 17)) > 1) {
       suppressWarnings(ICES_custom_plot(SAG_data_reactive(), sagSettings(), ChartKey = 17, query$sagStamp))
     } else {
       return(NULL)
@@ -495,7 +496,7 @@ server <- function(input, output, session) {
   })
 
   output$customPlot4 <- renderPlotly({
-    if (nrow(sagSettings() %>% filter(SAGChartKey == 18)) >= 1) {
+    if (nrow(sagSettings() %>% filter(SAGChartKey == 18)) > 1) {
       suppressWarnings(ICES_custom_plot(SAG_data_reactive(), sagSettings(), ChartKey = 18, query$sagStamp))
     } else {
       return(NULL)

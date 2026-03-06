@@ -158,7 +158,20 @@ get_Stock_info <- function(CommonName, stockcode, assessmentYear, AssessmentComp
   eco_q   <- URLencode(eco_one %||% "", reserved = TRUE)
   # eco_q   <- URLencode(EcoRegion %||% "", reserved = TRUE)
   fx_url  <- paste0(fx_base, "#eco=", eco_q, "&tab=stock_status&subtab=status_lookup&stock=", assessmentkey)
-  fx_link <- paste0("<a href='", fx_url, "' target='_blank' rel='noopener'>fisheriesXplorer</a>")
+  # fx_link <- paste0("<a href='", fx_url, "' target='_blank' rel='noopener'>fisheriesXplorer</a>")
+  # Build the clickable label (text + icon) inside the <a>
+  fx_anchor <- paste0(
+    "<a href='", fx_url, "' target='_blank' rel='noopener'>",
+    "fisheriesXplorer <i class='fa-solid fa-up-right-from-square'></i>",
+    "</a>"
+  )
+
+  # Wrap anchor in your tooltip span
+  fx_link <- paste0(
+    "<span class='hovertext' data-hover='Go to fisheriesXplorer for stock status information'>",
+    fx_anchor,
+    "</span>"
+  )
 
    stock_info_sentence <- HTML(
     paste0(

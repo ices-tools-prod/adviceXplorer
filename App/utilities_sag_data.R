@@ -469,10 +469,12 @@ get_scaling <- function(values, scaling_factor, type = "default") {
 }
 
 get_scaling_factor <- function(unit_type, unit_value) {
+  
   scaling_factor <- switch(unit_value,
                            "thousands" = 1000,
                            "Thousands" = 1000,
                            "empty" = ifelse(unit_type == "UnitOfRecruitment", 1000, 1),
+                           "N" = 1,
                            "Relative Recruitment" = 1,
                            "Number of individuals (fisheries)" = 1,
                            "tonnes" = 1,
@@ -484,8 +486,13 @@ get_scaling_factor <- function(unit_type, unit_value) {
                            "Kilograms per trip" = 1,
                            "Kilograms per trap" = 1,
                            "Kilograms per hook" = 1,
+                           "Kilograms per haul" = 1,
+                           "Kilograms per 1000 hooks" = 1,
                            "Kilograms per day" = 1,
+                           "Kilograms per gillnet station" = 1,
                            "kg/hr" = 1,
+                           "1000 Kilograms per trip" = 1,
+                           "Numbers per hour (fisheries)" = 1,
                            "UWTV abundance (billions)" = 1000000000,
                            "Number of individuals (billions)" = 1000000000,
                            "ratio" = 1,
