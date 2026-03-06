@@ -3390,3 +3390,6 @@ sort(unique(deps$Package))
 
 lock <- jsonlite::read_json("renv.lock")
 "tm" %in% names(lock$Packages)
+
+git mv utilities_SID_data.r temp.R
+git mv temp.R utilities_SID_data.R
