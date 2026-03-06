@@ -294,14 +294,6 @@ parse_location_from_stock_description <- function(stock_description) {
 #'
 #' @references
 #'
-
-# match_stockcode_to_illustration <- function(StockKeyLabel, df) {
-#   sapply(StockKeyLabel, function(key) {
-#     temp <- list.files("./App/www", pattern = substr(key, 1, 3))
-#     if (length(temp) == 0) "fish.png" else temp[1]
-#   })
-# }
-
 match_stockcode_to_illustration_offline <- function(stock_codes,
                                                     disk_www_dir = "App/www",
                                                     web_prefix = "",      # "" if files are directly under www; "icons/" if under www/icons
@@ -329,27 +321,7 @@ match_stockcode_to_illustration_offline <- function(stock_codes,
   }, USE.NAMES = FALSE)
 }
 
-#' Returns the HTML string to create the hyperlink to the SAG database
-#'
-#' @param assessmentKey
-#'
-#' @return string
-#'
-#' @note
-#' Can add some helpful information here
-#'
-#' @seealso
-#'
-#' @examples
-#' \dontrun{
-#' createLink_SAG_db(15609)
-#' }
-#'
-# createLink_SAG_db <- function(assessmentKey) {
-#   SAG_string <- paste0("<a href='","https://standardgraphs.ices.dk/ViewCharts.aspx?key=", assessmentKey,"' target='_blank'>",
-#   "<img src= 'database.png'", " height= '30px'/>", "</a>")
-#   return(SAG_string)
-# }
+
 
 
 #' Returns a javascript string that allows to pre-select the the first radio-button of the filtered stock list table.
