@@ -3371,3 +3371,25 @@ names(sagData)
 
 listRefPoints <- unique(c(sagData$CustomRefPointName1, sagData$CustomRefPointName2, sagData$CustomRefPointName3, sagData$CustomRefPointName4, sagData$CustomRefPointName5))
 write.table(listRefPoints, "D:/GitHub_2023/online-advice/listRefPoints.csv", row.names = FALSE, col.names = FALSE, sep = ",")
+
+renv::dependencies("App")
+
+deps <- renv::dependencies("App")
+deps <- deps[!grepl("rsconnect", deps$Source, ignore.case = TRUE), ]
+deps <- deps[!grepl("profiling\\.R$", deps$Source, ignore.case = TRUE), ]
+deps <- deps[!grepl("update_data_and_deploy_app\\.r$", deps$Source, ignore.case = TRUE), ]
+deps <- deps[!grepl("Update_SID_cache\\.R$", deps$Source, ignore.case = TRUE), ]
+deps <- deps[!grepl("update_SID_data\\.R$", deps$Source, ignore.case = TRUE), ]
+
+file <- renv::lockfile_create(packages = sort(unique(deps$Package)))
+renv::lockfile_write(file)
+
+
+deps <- renv::dependencies("App")
+sort(unique(deps$Package))
+
+lock <- jsonlite::read_json("renv.lock")
+"tm" %in% names(lock$Packages)
+
+git mv utilities_SID_data.r temp.R
+git mv temp.R utilities_SID_data.R
