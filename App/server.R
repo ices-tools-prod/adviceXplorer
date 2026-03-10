@@ -717,16 +717,22 @@ server <- function(input, output, session) {
     contentType = "application/zip"
   )
 
+
   output$TAC_download <- renderUI({
-    validate(
-      need(!is_empty(catch_scenario_table()$table), "")
+  validate(
+    need(!is_empty(catch_scenario_table()$table), "")
+  )
+
+  shiny::tagList(
+    shiny::tags$br(),
+    download_icon_label(
+      text = "Download catch time series data",
+      outputId = "download_TAC_Data",
+      hover_text = "Catch time series data download"
     )
-    HTML(paste0(
-      "<br/>",
-      "<span class='hovertext' data-hover='Catch time series data download'>",
-      downloadLink("download_TAC_Data", HTML("<font size= 3>Download catch time series data <i class='fa-solid fa-cloud-arrow-down'></i></font></span>"))
-    ))
-  })
+  )
+})
+
   ############ Radial plot panel (Selection panel)
   output$catch_scenarios_radial <- renderUI({
     if (!is_empty(catch_scenario_table_previous_year()$table)) {
