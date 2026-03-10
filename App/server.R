@@ -734,19 +734,10 @@ server <- function(input, output, session) {
 
   shiny::tagList(
     shiny::tags$br(),
-    shiny::tags$span(
-      class = "hovertext",
-      `data-hover` = "Catch time series data download",
-      shiny::downloadLink(
-        outputId = "download_TAC_Data",
-        label = shiny::tagList(
-          shiny::tags$span(
-            style = "font-size: 14px;",
-            "Download catch time series data "
-          ),
-          shiny::icon("cloud-arrow-down")
-        )
-      )
+    download_icon_label(
+      text = "Download catch time series data",
+      outputId = "download_TAC_Data",
+      hover_text = "Catch time series data download"
     )
   )
 })

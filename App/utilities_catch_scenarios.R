@@ -105,6 +105,156 @@ get_Advice_View_Summary <- function(catch_scenario_list, StockDescription) {
 
 #   return(catch_scenario_advice_sentence)
 # }
+# get_Advice_View_Headline <- function(catch_scenario_list,
+#                                      replaced_advice_doi,
+#                                      tabset_id,
+#                                      catch_scenario_table,
+#                                      drop_plots) {
+
+#   headline_link <- shiny::tags$span(
+#     class = "hovertext",
+#     `data-hover` = "Click here to access the pdf version of the Advice",
+#     shiny::tags$a(
+#       href = catch_scenario_list$adviceDOI,
+#       target = "_blank",
+#       rel = "noopener",
+#       shiny::tags$b(
+#         shiny::tags$i(
+#           shiny::tags$span(
+#             style = "font-size: 18px;",
+#             "Headline advice "
+#           )
+#         )
+#       ),
+#       shiny::icon("up-right-from-square")
+#     )
+#   )
+
+#   advice_sentence <- shiny::tags$span(
+#     style = "font-size: 14px;",
+#     catch_scenario_list$adviceSentence
+#   )
+
+#   replaced_link <- NULL
+#   if (!is.null(replaced_advice_doi) &&
+#       length(replaced_advice_doi) > 0 &&
+#       !is.na(replaced_advice_doi) &&
+#       nzchar(replaced_advice_doi)) {
+
+#     replaced_link <- shiny::tagList(
+#       shiny::tags$br(),
+#       shiny::tags$span(
+#         class = "hovertext",
+#         `data-hover` = "Link to the replaced Advice",
+#         shiny::tags$a(
+#           href = replaced_advice_doi,
+#           target = "_blank",
+#           rel = "noopener",
+#           shiny::tags$span(
+#             style = "font-size: 14px;",
+#             "Replaced advice "
+#           ),
+#           shiny::icon("up-right-from-square")
+#         )
+#       )
+#     )
+#   }
+
+#   tab_specific_link <- NULL
+
+#   if (tabset_id == "Development over time") {
+
+#     tab_specific_link <- shiny::tagList(
+#       shiny::tags$br(),
+#       shiny::tags$span(
+#         class = "hovertext",
+#         `data-hover` = "Standard graphs data download",
+#         shiny::downloadLink(
+#           outputId = "download_SAG_Data",
+#           label = shiny::tagList(
+#             shiny::tags$span(
+#               style = "font-size: 14px;",
+#               "Download assessment data "
+#             ),
+#             shiny::icon("cloud-arrow-down")
+#           )
+#         )
+#       )
+#     )
+
+#   } else if (tabset_id == "Quality of assessment" && all(!10 %in% drop_plots)) {
+
+#     tab_specific_link <- shiny::tagList(
+#       shiny::tags$br(),
+#       shiny::tags$span(
+#         class = "hovertext",
+#         `data-hover` = "Quality of assessment data download",
+#         shiny::downloadLink(
+#           outputId = "download_QualAss_Data",
+#           label = shiny::tagList(
+#             shiny::tags$span(
+#               style = "font-size: 14px;",
+#               "Download quality of assessment data "
+#             ),
+#             shiny::icon("cloud-arrow-down")
+#           )
+#         )
+#       )
+#     )
+
+#   } else if (tabset_id == "Catch scenarios") {
+
+#     asd_link <- shiny::tags$span(
+#       class = "hovertext",
+#       `data-hover` = "Link to ASD entry",
+#       shiny::tags$a(
+#         href = paste0("http://asd.ices.dk/viewAdvice/", catch_scenario_list$adviceKey),
+#         target = "_blank",
+#         rel = "noopener",
+#         shiny::tags$span(
+#           style = "font-size: 14px;",
+#           "View ASD entry "
+#         ),
+#         shiny::icon("up-right-from-square")
+#       )
+#     )
+
+#     if (!is_empty(catch_scenario_table)) {
+#       tab_specific_link <- shiny::tagList(
+#         shiny::tags$br(),
+#         asd_link,
+#         shiny::tags$span(" or "),
+#         shiny::tags$span(
+#           class = "hovertext",
+#           `data-hover` = "Download table (.csv)",
+#           shiny::downloadLink(
+#             outputId = "download_catch_table",
+#             label = shiny::tagList(
+#               shiny::tags$span(
+#                 style = "font-size: 14px;",
+#                 "Download catch scenario table "
+#               ),
+#               shiny::icon("cloud-arrow-down")
+#             )
+#           )
+#         )
+#       )
+#     } else {
+#       tab_specific_link <- shiny::tagList(
+#         shiny::tags$br(),
+#         asd_link
+#       )
+#     }
+#   }
+
+#   shiny::tagList(
+#     headline_link,
+#     shiny::tags$br(),
+#     advice_sentence,
+#     replaced_link,
+#     tab_specific_link
+#   )
+# }
 get_Advice_View_Headline <- function(catch_scenario_list,
                                      replaced_advice_doi,
                                      tabset_id,
@@ -140,22 +290,13 @@ get_Advice_View_Headline <- function(catch_scenario_list,
       length(replaced_advice_doi) > 0 &&
       !is.na(replaced_advice_doi) &&
       nzchar(replaced_advice_doi)) {
-
     replaced_link <- shiny::tagList(
       shiny::tags$br(),
-      shiny::tags$span(
-        class = "hovertext",
-        `data-hover` = "Link to the replaced Advice",
-        shiny::tags$a(
-          href = replaced_advice_doi,
-          target = "_blank",
-          rel = "noopener",
-          shiny::tags$span(
-            style = "font-size: 14px;",
-            "Replaced advice "
-          ),
-          shiny::icon("up-right-from-square")
-        )
+      external_icon_link(
+        text = "Replaced advice",
+        href = replaced_advice_doi,
+        hover_text = "Link to the replaced Advice",
+        size = "14px"
       )
     )
   }
@@ -163,60 +304,32 @@ get_Advice_View_Headline <- function(catch_scenario_list,
   tab_specific_link <- NULL
 
   if (tabset_id == "Development over time") {
-
     tab_specific_link <- shiny::tagList(
       shiny::tags$br(),
-      shiny::tags$span(
-        class = "hovertext",
-        `data-hover` = "Standard graphs data download",
-        shiny::downloadLink(
-          outputId = "download_SAG_Data",
-          label = shiny::tagList(
-            shiny::tags$span(
-              style = "font-size: 14px;",
-              "Download assessment data "
-            ),
-            shiny::icon("cloud-arrow-down")
-          )
-        )
+      download_icon_label(
+        text = "Download assessment data",
+        outputId = "download_SAG_Data",
+        hover_text = "Standard graphs data download",
+        size = "14px"
       )
     )
-
   } else if (tabset_id == "Quality of assessment" && all(!10 %in% drop_plots)) {
-
     tab_specific_link <- shiny::tagList(
       shiny::tags$br(),
-      shiny::tags$span(
-        class = "hovertext",
-        `data-hover` = "Quality of assessment data download",
-        shiny::downloadLink(
-          outputId = "download_QualAss_Data",
-          label = shiny::tagList(
-            shiny::tags$span(
-              style = "font-size: 14px;",
-              "Download quality of assessment data "
-            ),
-            shiny::icon("cloud-arrow-down")
-          )
-        )
+      download_icon_label(
+        text = "Download quality of assessment data",
+        outputId = "download_QualAss_Data",
+        hover_text = "Quality of assessment data download",
+        size = "14px"
       )
     )
-
   } else if (tabset_id == "Catch scenarios") {
 
-    asd_link <- shiny::tags$span(
-      class = "hovertext",
-      `data-hover` = "Link to ASD entry",
-      shiny::tags$a(
-        href = paste0("http://asd.ices.dk/viewAdvice/", catch_scenario_list$adviceKey),
-        target = "_blank",
-        rel = "noopener",
-        shiny::tags$span(
-          style = "font-size: 14px;",
-          "View ASD entry "
-        ),
-        shiny::icon("up-right-from-square")
-      )
+    asd_link <- external_icon_link(
+      text = "View ASD entry",
+      href = paste0("http://asd.ices.dk/viewAdvice/", catch_scenario_list$adviceKey),
+      hover_text = "Link to ASD entry",
+      size = "14px"
     )
 
     if (!is_empty(catch_scenario_table)) {
@@ -224,19 +337,11 @@ get_Advice_View_Headline <- function(catch_scenario_list,
         shiny::tags$br(),
         asd_link,
         shiny::tags$span(" or "),
-        shiny::tags$span(
-          class = "hovertext",
-          `data-hover` = "Download table (.csv)",
-          shiny::downloadLink(
-            outputId = "download_catch_table",
-            label = shiny::tagList(
-              shiny::tags$span(
-                style = "font-size: 14px;",
-                "Download catch scenario table "
-              ),
-              shiny::icon("cloud-arrow-down")
-            )
-          )
+        download_icon_label(
+          text = "Download catch scenario table",
+          outputId = "download_catch_table",
+          hover_text = "Download table (.csv)",
+          size = "14px"
         )
       )
     } else {
@@ -255,7 +360,6 @@ get_Advice_View_Headline <- function(catch_scenario_list,
     tab_specific_link
   )
 }
-
 
 
 choose_ecoregion_for_url <- function(EcoRegion) {
@@ -345,6 +449,97 @@ choose_ecoregion_for_url <- function(EcoRegion) {
 
 #   stock_info_sentence
 # }
+# get_Stock_info <- function(CommonName, stockcode, assessmentYear,
+#                            AssessmentComponent, description,
+#                            EcoRegion, assessmentkey) {
+
+#   fx_base <- "https://ices-tools-dev.shinyapps.io/fisheriesXplorer/"
+
+#   eco_one <- choose_ecoregion_for_url(EcoRegion)
+#   eco_q   <- URLencode(eco_one %||% "", reserved = TRUE)
+
+#   fx_url <- paste0(
+#     fx_base,
+#     "#eco=", eco_q,
+#     "&tab=stock_status&subtab=status_lookup&stock=", assessmentkey
+#   )
+
+#   fx_link <- shiny::tags$span(
+#     class = "hovertext",
+#     `data-hover` = "Go to fisheriesXplorer for stock status information",
+#     shiny::tags$a(
+#       href = fx_url,
+#       target = "_blank",
+#       rel = "noopener",
+#       "fisheriesXplorer ",
+#       shiny::icon("up-right-from-square")
+#     )
+#   )
+
+#   location_text <- parse_location_from_stock_description(description)
+
+#   has_component <- !all(AssessmentComponent == "NA")
+
+#   stock_info_sentence <- shiny::tagList(
+#     shiny::tags$b(
+#       shiny::tags$i(
+#         shiny::tags$span(
+#           style = "font-size: 18px;",
+#           "Stock information:"
+#         )
+#       )
+#     ),
+#     shiny::tags$br(),
+
+#     shiny::tags$span(
+#       style = "font-size: 14px;",
+#       "Common name: ",
+#       shiny::tags$b(CommonName)
+#     ),
+#     shiny::tags$br(),
+
+#     shiny::tags$span(
+#       style = "font-size: 14px;",
+#       "Stock code: ",
+#       shiny::tags$b(stockcode)
+#     ),
+#     shiny::tags$br(),
+
+#     shiny::tags$span(
+#       style = "font-size: 14px;",
+#       "Assessment year: ",
+#       shiny::tags$b(assessmentYear)
+#     ),
+#     shiny::tags$br(),
+
+#     if (has_component) {
+#       shiny::tagList(
+#         shiny::tags$span(
+#           style = "font-size: 14px;",
+#           "Component: ",
+#           shiny::tags$b(AssessmentComponent)
+#         ),
+#         shiny::tags$br()
+#       )
+#     },
+
+#     shiny::tags$span(
+#       style = "font-size: 14px;",
+#       "Location: ",
+#       shiny::tags$b(location_text)
+#     ),
+#     shiny::tags$br(),
+
+#     shiny::tags$span(
+#       style = "font-size: 14px;",
+#       "Status: ",
+#       shiny::tags$b(fx_link)
+#     ),
+#     shiny::tags$br()
+#   )
+
+#   stock_info_sentence
+# }
 get_Stock_info <- function(CommonName, stockcode, assessmentYear,
                            AssessmentComponent, description,
                            EcoRegion, assessmentkey) {
@@ -360,23 +555,17 @@ get_Stock_info <- function(CommonName, stockcode, assessmentYear,
     "&tab=stock_status&subtab=status_lookup&stock=", assessmentkey
   )
 
-  fx_link <- shiny::tags$span(
-    class = "hovertext",
-    `data-hover` = "Go to fisheriesXplorer for stock status information",
-    shiny::tags$a(
-      href = fx_url,
-      target = "_blank",
-      rel = "noopener",
-      "fisheriesXplorer ",
-      shiny::icon("up-right-from-square")
-    )
+  fx_link <- external_icon_link(
+    text = "fisheriesXplorer",
+    href = fx_url,
+    hover_text = "Go to fisheriesXplorer for stock status information",
+    size = "14px"
   )
 
   location_text <- parse_location_from_stock_description(description)
+  has_component <- !all(is.na(AssessmentComponent) | AssessmentComponent == "NA")
 
-  has_component <- !all(AssessmentComponent == "NA")
-
-  stock_info_sentence <- shiny::tagList(
+  shiny::tagList(
     shiny::tags$b(
       shiny::tags$i(
         shiny::tags$span(
@@ -413,7 +602,7 @@ get_Stock_info <- function(CommonName, stockcode, assessmentYear,
         shiny::tags$span(
           style = "font-size: 14px;",
           "Component: ",
-          shiny::tags$b(AssessmentComponent)
+          shiny::tags$b(paste(AssessmentComponent, collapse = ", "))
         ),
         shiny::tags$br()
       )
@@ -433,10 +622,7 @@ get_Stock_info <- function(CommonName, stockcode, assessmentYear,
     ),
     shiny::tags$br()
   )
-
-  stock_info_sentence
 }
-
 
 #' Returns an HTML string containing the catch scenario table's footnotes.
 #'
