@@ -422,3 +422,168 @@ header_info_and_headline <- function(info_id, headline_id) {
 
 
 
+#' Build a generic action link with optional tooltip and icon
+#'
+#' Create a reusable UI element for either an external hyperlink or a Shiny
+#' download link. The element can optionally include a tooltip via the
+#' \code{hovertext} CSS class and a Font Awesome icon rendered with
+#' \code{shiny::icon()}.
+#'
+#' @param text Character string used as the visible label.
+#' @param hover_text Optional character string used as tooltip text in the
+#'   \code{data-hover} attribute. If \code{NULL} or empty, no tooltip wrapper
+#'   is added.
+#' @param icon Optional character string giving the Font Awesome icon name
+#'   passed to \code{shiny::icon()} (without the \code{fa-} prefix).
+#' @param size Character string giving the CSS font size (e.g. \code{"14px"}).
+#' @param href Optional character string for an external link target.
+#' @param outputId Optional character string for a Shiny \code{downloadLink()}.
+#' @param target Character string passed to \code{tags$a()} for external links.
+#'   Defaults to \code{"_blank"}.
+#' @param rel Character string passed to \code{tags$a()} for external links.
+#'   Defaults to \code{"noopener"}.
+#'
+#' @return A Shiny tag object.
+#'
+#' @details
+#' Exactly one of \code{href} or \code{outputId} must be supplied. If
+#' \code{href} is supplied, the function returns an external link created with
+#' \code{shiny::tags$a()}. If \code{outputId} is supplied, it returns a
+#' \code{shiny::downloadLink()}.
+#'
+#' @examples
+#' \dontrun{
+#' icon_action_link(
+#'   text = "Open report",
+#'   hover_text = "Open report in a new tab",
+#'   icon = "up-right-from-square",
+#'   href = "https://example.org/report"
+#' )
+#'
+#' icon_action_link(
+#'   text = "Download data",
+#'   hover_text = "Download CSV file",
+#'   icon = "cloud-arrow-down",
+#'   outputId = "download_data"
+#' )
+#' }
+#'
+#' @importFrom shiny tags tagList icon downloadLink
+#' @noRd
+icon_action_link <- function(text,
+                             hover_text = NULL,
+                             icon = NULL,
+                             size = "14px",
+                             href = NULL,
+                             outputId = NULL,
+                             target = "_blank",
+                             rel = "noopener") {
+
+  if (is.null(href) == is.null(outputId)) {
+    stop("Provide exactly one of `href` or `outputId`.")
+  }
+
+  label_tag <- shiny::tags$span(
+    style = paste0("font-size:", size, ";"),
+    text,
+    if (!is.null(icon)) shiny::tagList(" ", shiny::icon(icon))
+  )
+
+  link_tag <- if (!is.null(href)) {
+    shiny::tags$a(
+      href = href,
+      target = target,
+      rel = rel,
+      label_tag
+    )
+  } else {
+    shiny::downloadLink(
+      outputId = outputId,
+      label = label_tag
+    )
+  }
+
+  if (!is.null(hover_text) && nzchar(hover_text)) {
+    shiny::tags$span(
+      class = "hovertext",
+      `data-hover` = hover_text,
+      link_tag
+    )
+  } else {
+    link_tag
+  }
+}
+
+#' Build a download link label with icon and optional tooltip
+#'
+#' Thin wrapper around \code{icon_action_link()} for download links.
+#'
+#' @param text Character string used as the visible label.
+#' @param outputId Character string passed to \code{downloadLink()}.
+#' @param hover_text Optional tooltip text.
+#' @param size Character string giving the CSS font size.
+#'
+#' @return A Shiny tag object.
+#'
+#' @examples
+#' \dontrun{
+#' download_icon_label(
+#'   text = "Download data",
+#'   outputId = "download_data",
+#'   hover_text = "Download CSV file"
+#' )
+#' }
+#'
+#' @noRd
+download_icon_label <- function(text = "Download data",
+                                outputId,
+                                hover_text = NULL,
+                                size = "14px") {
+  icon_action_link(
+    text = text,
+    hover_text = hover_text,
+    icon = "cloud-arrow-down",
+    size = size,
+    outputId = outputId
+  )
+}
+
+#' Build an external link with icon and optional tooltip
+#'
+#' Thin wrapper around \code{icon_action_link()} for external links.
+#'
+#' @param text Character string used as the visible label.
+#' @param href Character string giving the external URL.
+#' @param hover_text Optional tooltip text.
+#' @param size Character string giving the CSS font size.
+#' @param target Character string passed to \code{tags$a()}.
+#' @param rel Character string passed to \code{tags$a()}.
+#'
+#' @return A Shiny tag object.
+#'
+#' @examples
+#' \dontrun{
+#' external_icon_link(
+#'   text = "Open application",
+#'   href = "https://example.org",
+#'   hover_text = "Open in a new tab"
+#' )
+#' }
+#'
+#' @noRd
+external_icon_link <- function(text,
+                               href,
+                               hover_text = NULL,
+                               size = "14px",
+                               target = "_blank",
+                               rel = "noopener") {
+  icon_action_link(
+    text = text,
+    hover_text = hover_text,
+    icon = "up-right-from-square",
+    size = size,
+    href = href,
+    target = target,
+    rel = rel
+  )
+}
