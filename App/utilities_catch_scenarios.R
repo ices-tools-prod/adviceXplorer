@@ -249,7 +249,7 @@ get_Stock_info <- function(CommonName, ScientificName, stockcode, assessmentYear
     shiny::tags$span(
       style = "font-size: 14px;",
       "Scientific name: ",
-      shiny::tags$b(ScientificName)
+      shiny::tags$b(shiny::tags$i(ScientificName))
     ),
     shiny::tags$br(),
 
