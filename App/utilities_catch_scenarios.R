@@ -207,7 +207,7 @@ get_Stock_info <- function(CommonName, ScientificName, stockcode, assessmentYear
                            AssessmentComponent, description,
                            EcoRegion, assessmentkey) {
 
-  fx_base <- "https://ices-tools-dev.shinyapps.io/fisheriesXplorer/"
+  fx_base <- "https://ices-taf.shinyapps.io/fisheriesXplorer/"
 
   eco_one <- choose_ecoregion_for_url(EcoRegion)
   eco_q   <- URLencode(eco_one %||% "", reserved = TRUE)
