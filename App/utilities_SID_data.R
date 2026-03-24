@@ -199,7 +199,7 @@ adviceXplorer_stocks_to_exclude_for_lunch <- c("cod.27.1-2",
 download_SID <- function(Year) {
   stock_list_all <- jsonlite::fromJSON(
     URLencode(
-      sprintf("http://sd.ices.dk/services/odata4/StockListDWs4?$filter=ActiveYear eq %s&$select=StockKeyLabel, StockKeyDescription, SpeciesCommonName, EcoRegion, YearOfLastAssessment, AssessmentFrequency, YearOfNextAssessment, AssessmentKey", Year)
+      sprintf("http://sd.ices.dk/services/odata4/StockListDWs4?$filter=ActiveYear eq %s&$select=StockKeyLabel, StockKeyDescription, SpeciesCommonName, SpeciesScientificName, EcoRegion, YearOfLastAssessment, AssessmentFrequency, YearOfNextAssessment, AssessmentKey", Year)
     )
   )$value
   # stock_list_all <- stock_list_all %>% filter(!StockKeyLabel %in% adviceXplorer_stocks_to_exclude_for_lunch)
