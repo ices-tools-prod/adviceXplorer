@@ -195,7 +195,7 @@ choose_ecoregion_for_url <- function(EcoRegion) {
 #'
 #' @examples
 #' \dontrun{
-#' get_Stock_info(stockcode, StockDescription, assessmentYear, AssessmentComponent, description, EcoRegion, assessmentkey)
+#' get_Stock_info("Cod", "Gadus morhua", "COD123", 2023, "Component A", "Description of the stock", "North Sea", "ASD123")
 #' }
 #'
 #' @references
@@ -203,11 +203,11 @@ choose_ecoregion_for_url <- function(EcoRegion) {
 #' 
 #'
 #' @export
-get_Stock_info <- function(CommonName, stockcode, assessmentYear,
+get_Stock_info <- function(CommonName, ScientificName, stockcode, assessmentYear,
                            AssessmentComponent, description,
                            EcoRegion, assessmentkey) {
 
-  fx_base <- "https://ices-tools-dev.shinyapps.io/fisheriesXplorer/"
+  fx_base <- "https://ices-taf.shinyapps.io/fisheriesXplorer/"
 
   eco_one <- choose_ecoregion_for_url(EcoRegion)
   eco_q   <- URLencode(eco_one %||% "", reserved = TRUE)
@@ -243,6 +243,13 @@ get_Stock_info <- function(CommonName, stockcode, assessmentYear,
       style = "font-size: 14px;",
       "Common name: ",
       shiny::tags$b(CommonName)
+    ),
+    shiny::tags$br(),
+
+    shiny::tags$span(
+      style = "font-size: 14px;",
+      "Scientific name: ",
+      shiny::tags$b(shiny::tags$i(ScientificName))
     ),
     shiny::tags$br(),
 
