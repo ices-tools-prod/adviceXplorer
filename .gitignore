@@ -59,9 +59,9 @@ vignettes/*.pdf
 /App/Data/SID_2023/
 /App/Data/SID_2024/
 
-# worksheet file
-/dev/worksheet.R
+# dev files
 
+/dev/
 /hangman/
 
 renv/library/
