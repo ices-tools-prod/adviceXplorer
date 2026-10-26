@@ -348,6 +348,7 @@ make_disclaimer_block <- function() {
 #' (no attempt is made to parse given/family names), which works well
 #' for corporate authors such as \dQuote{ICES}.
 #'
+#'
 #' @examples
 #' \dontrun{
 #' cite <- build_app_citation()
