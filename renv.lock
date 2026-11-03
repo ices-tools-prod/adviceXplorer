@@ -5048,11 +5048,11 @@
     },
     "terra": {
       "Package": "terra",
-      "Version": "1.8-29",
+      "Version": "1.8-93",
       "Source": "Repository",
       "Type": "Package",
       "Title": "Spatial Data Analysis",
-      "Date": "2025-02-25",
+      "Date": "2026-01-11",
       "Depends": [
         "R (>= 3.5.0)"
       ],
