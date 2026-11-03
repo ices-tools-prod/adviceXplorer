@@ -761,56 +761,55 @@ server <- function(input, output, session) {
   })
 
   output$Radial_plot_disclaimer <- renderUI(
-    HTML("<br><br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment. <br/>
-  The scale of the plot is relative across the scenarios presented, please refer to the table or the % of change plot for actual percentage of change.")
+    HTML("<br><br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment.")
   )
-  ############ Lollipop plot panel (Selection panel)
-  output$catch_indicators_lollipop <- renderUI({
-    if (!is_empty(catch_scenario_table_previous_year()$table)) {
-      virtualSelectInput(
-        inputId = "indicator_choice_lollipop",
-        label = "Select one ore more indicators:",
-        choices = catch_scenario_table_percentages() %>%
-          select(where(~ !any(is.na(.)))) %>%
-          names() %>%
-          str_subset(pattern = c("Year|Scenario|cS_Purpose"), negate = TRUE),
-        selected = c("SSB change"),
-        multiple = TRUE,
-        width = "100%",
-        search = TRUE
-      )
-    } else {
-      HTML("")
-    }
-  })
+  # ############ Lollipop plot panel (Selection panel)
+  # output$catch_indicators_lollipop <- renderUI({
+  #   if (!is_empty(catch_scenario_table_previous_year()$table)) {
+  #     virtualSelectInput(
+  #       inputId = "indicator_choice_lollipop",
+  #       label = "Select one ore more indicators:",
+  #       choices = catch_scenario_table_percentages() %>%
+  #         select(where(~ !any(is.na(.)))) %>%
+  #         names() %>%
+  #         str_subset(pattern = c("Year|Scenario|cS_Purpose"), negate = TRUE),
+  #       selected = c("SSB change"),
+  #       multiple = TRUE,
+  #       width = "100%",
+  #       search = TRUE
+  #     )
+  #   } else {
+  #     HTML("")
+  #   }
+  # })
+  #
+  # ############ Lollipop plot panel (Lollipop plot)
+  # output$Lollipop_plot <- renderPlotly({
+  #   validate(
+  #     need(!is_empty(advice_view_info()), "No ASD entry in assessment year"),
+  #     need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
+  #   )
+  #   lollipop_plot(catch_scenario_table_percentages(), input$indicator_choice_lollipop)
+  # })
+  #
+  # output$lollipop_plot_disclaimer <- renderUI(
+  #   HTML("<br> <br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment.")
+  # )
 
-  ############ Lollipop plot panel (Lollipop plot)
-  output$Lollipop_plot <- renderPlotly({
-    validate(
-      need(!is_empty(advice_view_info()), "No ASD entry in assessment year"),
-      need(!is_empty(advice_view_info_previous_year()), "No ASD entry in previous assessment year")
-    )
-    lollipop_plot(catch_scenario_table_percentages(), input$indicator_choice_lollipop)
-  })
 
-  output$lollipop_plot_disclaimer <- renderUI(
-    HTML("<br> <br> Disclaimer: the relative change for F, F wanted and HR has been calculated using the basis of advice of the previous year assessment.")
-  )
-
-
-  ###### Calendar of stock with modal
-  observeEvent(input$preview, {
-    # Show a modal when the button is pressed
-    shinyalert(
-      title = " Advice Calendar",
-      tags$body(HTML(html_calendar(advice_view_info(), res_mod(), input$rdbtn))),
-      type = "info",
-      html = TRUE,
-      closeOnClickOutside = TRUE,
-      confirmButtonText = "Close",
-      size = "s",
-    )
-  })
+  # ###### Calendar of stock with modal
+  # observeEvent(input$preview, {
+  #   # Show a modal when the button is pressed
+  #   shinyalert(
+  #     title = " Advice Calendar",
+  #     tags$body(HTML(html_calendar(advice_view_info(), res_mod(), input$rdbtn))),
+  #     type = "info",
+  #     html = TRUE,
+  #     closeOnClickOutside = TRUE,
+  #     confirmButtonText = "Close",
+  #     size = "s",
+  #   )
+  # })
 
 
   catch_scenario_table_collated <- eventReactive(catch_scenario_table(), {

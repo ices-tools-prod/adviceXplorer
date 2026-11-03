@@ -347,18 +347,17 @@ catch_scenarios_left_panel <- function() {
         uiOutput("TAC_download")       
       ),
       tabPanel(
-        "Relative change: radial plot",
+        "Change relative to scenarios",
         uiOutput("catch_scenarios_radial"),
         withSpinner(plotlyOutput("Radial_plot", height = "100%", width = "100%")),
         htmlOutput("Radial_plot_disclaimer")
-      ),
-      tabPanel(
-        "% of change: lollipop plot",
-        uiOutput("catch_indicators_lollipop"),
-        withSpinner(plotlyOutput("Lollipop_plot", height = "100%", width = "100%")),
-        htmlOutput("lollipop_plot_disclaimer")
-        # )
       )
+      # tabPanel(
+      #   "% of change: lollipop plot",
+      #   uiOutput("catch_indicators_lollipop"),
+      #   withSpinner(plotlyOutput("Lollipop_plot", height = "100%", width = "100%")),
+      #   htmlOutput("lollipop_plot_disclaimer")
+      # )
     )
   )
 }
