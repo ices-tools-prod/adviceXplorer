@@ -2612,47 +2612,74 @@ shorten_labels <- function(catch_scenarios_array) {
 #'
 ####### plots 1 catch scenarios
 radial_plot <- function(tmp, catch_scenarios) {
-    
-    not_all_na <- function(x) any(!is.na(x))
-    tmp <- tmp %>% select(where(not_all_na))
+  indicator_cols <- setdiff(names(tmp), c("Year", "Scenario", "cS_Purpose"))
+  indicator_cols <- indicator_cols[vapply(tmp[indicator_cols], function(x) any(!is.na(x)), logical(1))]
 
-    rescale_function <- function(x) rescale(x, to = c(0, 1), from = range(c(min(x), max(x))))
-    tmp <- tmp %>% select(-c(Year)) %>% na.omit() %>% mutate_if(is.numeric, rescale_function)
+  plot_df <- tmp %>%
+    filter(Scenario %in% catch_scenarios) %>%
+    select(Scenario, all_of(indicator_cols)) %>%
+    pivot_longer(all_of(indicator_cols), names_to = "Indicator", values_to = "Change") %>%
+    mutate(Indicator = factor(Indicator, levels = rev(indicator_cols)))
 
-    zz <- ggplotly(
-        ggradar(tmp %>% select(-cS_Purpose) %>% filter(Scenario %in% catch_scenarios),
-            base.size = 6,
-            font.radar = "sans",
-            values.radar = c("Min", "0", "Max"),
-            gridline.min.linetype = "longdash",
-            gridline.mid.linetype = "longdash",
-            gridline.max.linetype = "longdash",
-            gridline.min.colour = "grey",
-            gridline.mid.colour = "#007A87",
-            gridline.max.colour = "grey",
-            grid.label.size = 6,
-            label.gridline.min = TRUE,
-            label.gridline.mid = TRUE,
-            label.gridline.max = TRUE,
-            axis.label.offset = 1.20,
-            axis.label.size = 6,
-            axis.line.colour = "grey",
-            group.line.width = 1,
-            group.point.size = 4,
-            group.colours = NULL,
-            background.circle.colour = "#D7D6D1",
-            background.circle.transparency = 0.2,
-            plot.legend = TRUE, # if (nrow(catch_tab_stand_scaled) > 1) TRUE else FALSE,
-            legend.title = "Catch scenarios:",
-            plot.title = "",
-            legend.text.size = 8,
-            legend.position = "right"
-        ),
-        tooltip = c("Scenario")
+  plot_ly(
+    plot_df,
+    x = ~Change,
+    y = ~Indicator,
+    color = ~Scenario,
+    type = "bar",
+    orientation = "h",
+    hovertemplate = "<b>%{y}</b><br>%{fullData.name}: %{x:.1f}%<extra></extra>"
+  ) %>%
+    layout(
+      barmode = "group",
+      xaxis = list(title = "% change relative to basis of advice", zeroline = TRUE, zerolinewidth = 2),
+      yaxis = list(title = ""),
+      legend = list(title = list(text = "Catch scenarios"), orientation = "h", x = 0, y = -0.2)
     )
-    
-    zz
 }
+
+# radial_plot <- function(tmp, catch_scenarios) {
+#
+#     not_all_na <- function(x) any(!is.na(x))
+#     tmp <- tmp %>% select(where(not_all_na))
+#
+#     rescale_function <- function(x) rescale(x, to = c(0, 1), from = range(c(min(x), max(x))))
+#     tmp <- tmp %>% select(-c(Year)) %>% na.omit() %>% mutate_if(is.numeric, rescale_function)
+#
+#     zz <- ggplotly(
+#         ggradar(tmp %>% select(-cS_Purpose) %>% filter(Scenario %in% catch_scenarios),
+#             base.size = 6,
+#             font.radar = "sans",
+#             values.radar = c("Min", "0", "Max"),
+#             gridline.min.linetype = "longdash",
+#             gridline.mid.linetype = "longdash",
+#             gridline.max.linetype = "longdash",
+#             gridline.min.colour = "grey",
+#             gridline.mid.colour = "#007A87",
+#             gridline.max.colour = "grey",
+#             grid.label.size = 6,
+#             label.gridline.min = TRUE,
+#             label.gridline.mid = TRUE,
+#             label.gridline.max = TRUE,
+#             axis.label.offset = 1.20,
+#             axis.label.size = 6,
+#             axis.line.colour = "grey",
+#             group.line.width = 1,
+#             group.point.size = 4,
+#             group.colours = NULL,
+#             background.circle.colour = "#D7D6D1",
+#             background.circle.transparency = 0.2,
+#             plot.legend = TRUE, # if (nrow(catch_tab_stand_scaled) > 1) TRUE else FALSE,
+#             legend.title = "Catch scenarios:",
+#             plot.title = "",
+#             legend.text.size = 8,
+#             legend.position = "right"
+#         ),
+#         tooltip = c("Scenario")
+#     )
+#
+#     zz
+# }
 
 
 
@@ -3368,31 +3395,31 @@ TAC_timeline <- function(final_df, catch_scenarios, df) {
 #'
 #' @export
 #' 
-lollipop_plot <- function(df, indicator_choice_lollipop) {
-    
-    Basis <- df[df$cS_Purpose == "Basis Of Advice",]
-    
-    df <- df %>% select(-Year, -cS_Purpose)
-    dd <- df %>% pivot_longer(cols = -1, names_to = "indicator")
-    dd <- dd %>% filter(indicator %in% c(indicator_choice_lollipop))
-
-    #### this is a function to highlight the basis of advice tick label
-    #### at the moment is not working with all stocks, might have to do with 
-    #### special characters in the string like "/". When it works it moves 
-    #### the plot to the leaft leaving a big space on the left of the y labels
-    
-    
-    pvar <- ggplot(dd, aes(x = Scenario, y = value, fill = indicator, colour = indicator)) +
-        geom_segment(aes(x = Scenario, xend = as.factor(Scenario), y = 0, yend = value),
-            color = "gray", lwd = 2
-        ) +
-        geom_point(size = 3) +
-        coord_flip() +
-    
-        labs(y = "%", x = NULL) +
-        facet_wrap(~indicator)
-        
-        
-    fig8 <- ggplotly(pvar) %>% layout(showlegend = FALSE) #%>% 
-        #config(modeBarButtonsToAdd = list(data_download_button(disclaimer)))
-}
+# lollipop_plot <- function(df, indicator_choice_lollipop) {
+#
+#     Basis <- df[df$cS_Purpose == "Basis Of Advice",]
+#
+#     df <- df %>% select(-Year, -cS_Purpose)
+#     dd <- df %>% pivot_longer(cols = -1, names_to = "indicator")
+#     dd <- dd %>% filter(indicator %in% c(indicator_choice_lollipop))
+#
+#     #### this is a function to highlight the basis of advice tick label
+#     #### at the moment is not working with all stocks, might have to do with
+#     #### special characters in the string like "/". When it works it moves
+#     #### the plot to the leaft leaving a big space on the left of the y labels
+#
+#
+#     pvar <- ggplot(dd, aes(x = Scenario, y = value, fill = indicator, colour = indicator)) +
+#         geom_segment(aes(x = Scenario, xend = as.factor(Scenario), y = 0, yend = value),
+#             color = "gray", lwd = 2
+#         ) +
+#         geom_point(size = 3) +
+#         coord_flip() +
+#
+#         labs(y = "%", x = NULL) +
+#         facet_wrap(~indicator)
+#
+#
+#     fig8 <- ggplotly(pvar) %>% layout(showlegend = FALSE) #%>%
+#         #config(modeBarButtonsToAdd = list(data_download_button(disclaimer)))
+# }
