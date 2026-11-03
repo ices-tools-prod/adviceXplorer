@@ -593,19 +593,20 @@ server <- function(input, output, session) {
     }
 
     asd_record_previous <- getAdviceViewRecord(query$stockkeylabel, query$year - filtered_row$AssessmentFrequency[1])
-
     # this is a fix to cover an exeption (like aru.27.123a4) when the assessment frequency is 2 but there is an advice in the previous year.
     if (is_empty(asd_record_previous)) {
       asd_record_previous <- try(getAdviceViewRecord(query$stockkeylabel, query$year))
     }
 
     if (!is_empty(asd_record_previous)) {
+      comp <- replace_na_with_na_string(query$assessmentcomponent)
       asd_record_previous <- asd_record_previous %>% filter(
         adviceViewPublished == TRUE,
         adviceStatus == "Advice",
-        adviceComponent == replace_na_with_na_string(query$assessmentcomponent)
+        adviceComponent == comp | (is.na(adviceComponent) & comp == "N.A.")
       )
     }
+    asd_record_previous
   })
 
 
@@ -617,7 +618,7 @@ server <- function(input, output, session) {
 
   ##### catch scenarios table previous year in percentages (for radial plot)
   catch_scenario_table_previous_year <- eventReactive(req(advice_view_info_previous_year()), {
-    standardize_catch_scenario_table(icesASD::get_catch_scenario_table(advice_view_info_previous_year()$adviceKey, query$year))
+    standardize_catch_scenario_table(icesASD::get_catch_scenario_table(advice_view_info_previous_year()$adviceKey, query$year-1))
   })
 
   ##### catch scenario table scaled with the values of previous advice to get percentage of change
