@@ -2632,54 +2632,12 @@ radial_plot <- function(tmp, catch_scenarios) {
   ) %>%
     layout(
       barmode = "group",
-      xaxis = list(title = "% change relative to basis of advice", zeroline = TRUE, zerolinewidth = 2),
+      xaxis = list(title = "% change", zeroline = TRUE, zerolinewidth = 2),
       yaxis = list(title = ""),
       legend = list(title = list(text = "Catch scenarios"), orientation = "h", x = 0, y = -0.2)
     )
 }
 
-# radial_plot <- function(tmp, catch_scenarios) {
-#
-#     not_all_na <- function(x) any(!is.na(x))
-#     tmp <- tmp %>% select(where(not_all_na))
-#
-#     rescale_function <- function(x) rescale(x, to = c(0, 1), from = range(c(min(x), max(x))))
-#     tmp <- tmp %>% select(-c(Year)) %>% na.omit() %>% mutate_if(is.numeric, rescale_function)
-#
-#     zz <- ggplotly(
-#         ggradar(tmp %>% select(-cS_Purpose) %>% filter(Scenario %in% catch_scenarios),
-#             base.size = 6,
-#             font.radar = "sans",
-#             values.radar = c("Min", "0", "Max"),
-#             gridline.min.linetype = "longdash",
-#             gridline.mid.linetype = "longdash",
-#             gridline.max.linetype = "longdash",
-#             gridline.min.colour = "grey",
-#             gridline.mid.colour = "#007A87",
-#             gridline.max.colour = "grey",
-#             grid.label.size = 6,
-#             label.gridline.min = TRUE,
-#             label.gridline.mid = TRUE,
-#             label.gridline.max = TRUE,
-#             axis.label.offset = 1.20,
-#             axis.label.size = 6,
-#             axis.line.colour = "grey",
-#             group.line.width = 1,
-#             group.point.size = 4,
-#             group.colours = NULL,
-#             background.circle.colour = "#D7D6D1",
-#             background.circle.transparency = 0.2,
-#             plot.legend = TRUE, # if (nrow(catch_tab_stand_scaled) > 1) TRUE else FALSE,
-#             legend.title = "Catch scenarios:",
-#             plot.title = "",
-#             legend.text.size = 8,
-#             legend.position = "right"
-#         ),
-#         tooltip = c("Scenario")
-#     )
-#
-#     zz
-# }
 
 
 
@@ -2746,7 +2704,7 @@ catch_scenario_plot_1 <- function(tmp, df, sagSettings) {
 
     Basis <- tmp[tmp$cS_Purpose == "Basis Of Advice", ]
     tmp <- tmp[tmp$cS_Purpose == "Other Scenarios", ] %>%
-        dplyr::filter(TotCatch != Basis$TotCatch) %>%
+        dplyr::filter(!TotCatch %in% Basis$TotCatch) %>%
         dplyr::bind_rows(Basis)
     
 
@@ -3009,8 +2967,8 @@ catch_scenario_plot_1_nephrops <- function(tmp, df, sagSettings) {
     
     tmp$Scenario <- shorten_labels(tmp$Scenario)
     Basis <- tmp[tmp$cS_Purpose == "Basis Of Advice", ]
-    tmp <- tmp[tmp$cS_Purpose == "Other Scenarios",] %>% 
-      dplyr::filter(TotCatch != Basis$TotCatch) %>% 
+    tmp <- tmp[tmp$cS_Purpose == "Other Scenarios",] %>%
+      dplyr::filter(!TotCatch %in% Basis$TotCatch) %>%
       dplyr::bind_rows(Basis)
     
         

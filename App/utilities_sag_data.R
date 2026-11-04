@@ -649,7 +649,8 @@ process_dataframe_F <- function(df, sagSettings) {
 
 process_dataframe_SSB <- function(df, sagSettings, scaling_factor_stockSize) {
   nullifempty <- function(x) if (length(x) == 0) NULL else x
-
+  
+  
   # Use total biomass only if requested AND any TBiomass data exist
   useTotBiomass <- {
     flag <- sagSettings %>%
@@ -721,23 +722,25 @@ process_dataframe_SSB <- function(df, sagSettings, scaling_factor_stockSize) {
     ) %>%
     dplyr::mutate(
       Year = as.numeric(Year),
-      Blim = as.numeric(Blim),
-      Bpa  = as.numeric(Bpa),
-      MSYBtrigger = as.numeric(MSYBtrigger),
-      Bmanagement = as.numeric(Bmanagement),
-      BMGT_lower = as.numeric(BMGT_lower),
-      BMGT_upper = as.numeric(BMGT_upper),
 
-      # scale both sets consistently
+      # scale all metrics and reference points by the same factor
       StockSize      = as.numeric(StockSize)      * scaling_factor_stockSize,
       Low_StockSize  = as.numeric(Low_StockSize)  * scaling_factor_stockSize,
       High_StockSize = as.numeric(High_StockSize) * scaling_factor_stockSize,
 
       TBiomass      = as.numeric(TBiomass)      * scaling_factor_stockSize,
       Low_TBiomass  = as.numeric(Low_TBiomass)  * scaling_factor_stockSize,
-      High_TBiomass = as.numeric(High_TBiomass) * scaling_factor_stockSize
+      High_TBiomass = as.numeric(High_TBiomass) * scaling_factor_stockSize,
+
+      # scale reference points to match StockSize scaling
+      Blim = as.numeric(Blim) * scaling_factor_stockSize,
+      Bpa  = as.numeric(Bpa) * scaling_factor_stockSize,
+      MSYBtrigger = as.numeric(MSYBtrigger) * scaling_factor_stockSize,
+      Bmanagement = as.numeric(Bmanagement) * scaling_factor_stockSize,
+      BMGT_lower = as.numeric(BMGT_lower) * scaling_factor_stockSize,
+      BMGT_upper = as.numeric(BMGT_upper) * scaling_factor_stockSize
     ) %>%
-    dplyr::mutate(dplyr::across(dplyr::starts_with("CustomRefPointValue"), as.numeric))
+    dplyr::mutate(dplyr::across(dplyr::starts_with("CustomRefPointValue"), ~as.numeric(.) * scaling_factor_stockSize))
 
   # Unified metric columns
   if (useTotBiomass) {
